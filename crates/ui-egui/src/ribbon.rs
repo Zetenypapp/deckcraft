@@ -1431,7 +1431,7 @@ fn option_label(o: &str) -> String {
 }
 
 pub fn paint_transition_tile(p: &egui::Painter, r: Rect, (id, label): (&str, &str)) {
-    let t = Tokens::light();
+    let t = Tokens::get(p.ctx());
     let pic = Rect::from_min_size(r.min + vec2(4.0, 2.0), vec2(r.width() - 8.0, r.height() - 18.0));
     let blue = Color32::from_rgb(0x2E, 0x6F, 0xD8);
     let light = Color32::from_rgb(0xBF, 0xD4, 0xF5);
@@ -1676,7 +1676,7 @@ fn animations(app: &mut SlideApp, ui: &mut Ui) {
 }
 
 pub fn paint_anim_tile(p: &egui::Painter, r: Rect, label: &str, class: AnimClass, enabled: bool) {
-    let t = Tokens::light();
+    let t = Tokens::get(p.ctx());
     let icon = match class {
         AnimClass::Entrance => Icon::AnimEntrance,
         AnimClass::Emphasis => Icon::AnimEmphasis,
@@ -2404,4 +2404,43 @@ fn paint_freeform_icon(p: &egui::Painter, r: Rect, name: &str, ink: Color32) {
         _ => (0..=40).map(|i| i as f32 / 40.0).map(|u| at(u, 0.5 + 0.35 * (u * 19.0).sin() * (1.0 - u * 0.4))).collect(),
     };
     p.add(egui::Shape::line(pts, egui::Stroke::new(1.3, ink)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Text colours of the labels painted by `paint` under the given theme.
+    fn label_colours(tokens: &Tokens, paint: impl FnOnce(&egui::Painter)) -> Vec<(String, Color32)> {
+        let ctx = egui::Context::default();
+        theme::apply(&ctx, tokens);
+        ctx.begin_pass(egui::RawInput::default());
+        paint(&ctx.layer_painter(egui::LayerId::background()));
+        let mut out = ctx.end_pass();
+        out.textures_delta.clear();
+        out.shapes
+            .into_iter()
+            .filter_map(|c| match c.shape {
+                egui::Shape::Text(t) => Some((t.galley.text().to_owned(), t.fallback_color)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Animation and transition gallery labels follow the UI theme: they were painted with the
+    /// light tokens, so in dark mode they were dark grey on a dark ribbon.
+    #[test]
+    fn gallery_tiles_use_the_current_theme() {
+        let r = Rect::from_min_size(pos2(0.0, 0.0), vec2(60.0, 56.0));
+        for tokens in [Tokens::light(), Tokens::dark()] {
+            let labels = label_colours(&tokens, |p| {
+                paint_anim_tile(p, r, "Wipe", AnimClass::Entrance, true);
+                paint_transition_tile(p, r.translate(vec2(70.0, 0.0)), ("fade", "Fade"));
+            });
+            for want in ["Wipe", "Fade"] {
+                let got = labels.iter().find(|(s, _)| s == want).map(|(_, c)| *c);
+                assert_eq!(got, Some(tokens.text), "{want} label (dark mode: {})", tokens.dark);
+            }
+        }
+    }
 }

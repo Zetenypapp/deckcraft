@@ -37,10 +37,13 @@ pub enum Page {
     Print,
     Export,
     Account,
+    /// Keyboard Shortcuts: the user's own keys (#127).
+    Shortcuts,
 }
 
 impl Page {
-    pub const ALL: [Page; 8] = [Page::Home, Page::New, Page::Open, Page::Info, Page::SaveAs, Page::Print, Page::Export, Page::Account];
+    pub const ALL: [Page; 9] =
+        [Page::Home, Page::New, Page::Open, Page::Info, Page::SaveAs, Page::Print, Page::Export, Page::Account, Page::Shortcuts];
 
     /// The id `app.backstage {page}` takes.
     pub fn id(self) -> &'static str {
@@ -53,6 +56,7 @@ impl Page {
             Page::Print => "print",
             Page::Export => "export",
             Page::Account => "account",
+            Page::Shortcuts => "shortcuts",
         }
     }
 
@@ -72,6 +76,7 @@ impl Page {
             Page::Print => "Print",
             Page::Export => "Export",
             Page::Account => "Account",
+            Page::Shortcuts => "Shortcuts",
         }
     }
 
@@ -85,6 +90,7 @@ impl Page {
             Page::Print => Icon::Print,
             Page::Export => Icon::Export,
             Page::Account => Icon::Account,
+            Page::Shortcuts => Icon::Keyboard,
         }
     }
 
@@ -129,7 +135,7 @@ pub fn entries(has_doc: bool) -> (Vec<Nav>, Vec<Nav>) {
     if has_doc {
         top.extend([Nav::Page(Page::Info), Nav::Save, Nav::Page(Page::SaveAs), Nav::Page(Page::Print), Nav::Page(Page::Export), Nav::Close]);
     }
-    (top, vec![Nav::Page(Page::Account), Nav::Options])
+    (top, vec![Nav::Page(Page::Account), Nav::Page(Page::Shortcuts), Nav::Options])
 }
 
 /// Print page: which slides.
@@ -172,6 +178,19 @@ pub struct Backstage {
     pub file_type: &'static str,
     pub handouts_per_page: u8,
     pub pdf_hidden: bool,
+    /// Keyboard Shortcuts: the slide-show list instead of the editor's.
+    pub keys_show: bool,
+    /// Keyboard Shortcuts: only actions that have a key.
+    pub keys_bound_only: bool,
+    /// Keyboard Shortcuts: the action whose next key press is being recorded. While it is, the
+    /// app's own shortcuts are off.
+    pub recording: Option<String>,
+    /// Keyboard Shortcuts: a recorded key another action has (action, keys it would get, message).
+    pub clash: Option<(String, Vec<String>, String)>,
+    /// Keyboard Shortcuts: why the last recorded key was refused.
+    pub key_note: Option<String>,
+    /// Account: Reset all settings asked to be confirmed.
+    pub confirm_reset: bool,
 }
 
 impl Backstage {
@@ -192,6 +211,12 @@ impl Backstage {
             file_type: "pptx",
             handouts_per_page: 3,
             pdf_hidden: false,
+            keys_show: false,
+            keys_bound_only: true,
+            recording: None,
+            clash: None,
+            key_note: None,
+            confirm_reset: false,
         }
     }
 
@@ -200,6 +225,10 @@ impl Backstage {
         if self.page != page {
             self.query.clear();
             self.preview_page = 0;
+            self.recording = None;
+            self.clash = None;
+            self.key_note = None;
+            self.confirm_reset = false;
         }
         self.page = page;
     }
@@ -399,7 +428,8 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                     Page::SaveAs => save_as(app, ui, &mut bs, &mut out),
                     Page::Print => print(app, ui, &mut bs),
                     Page::Export => export(app, ui, &mut bs),
-                    Page::Account => account(app, ui),
+                    Page::Account => account(app, ui, &mut bs),
+                    Page::Shortcuts => shortcuts(app, ui, &mut bs),
                 }
             });
         });
@@ -1195,7 +1225,7 @@ fn bullets(ui: &mut Ui, items: &[&str]) {
 
 /// Account: the interface's appearance and what DeckCraft is. DeckCraft has no accounts, so
 /// there is nothing to sign in to.
-fn account(app: &mut SlideApp, ui: &mut Ui) {
+fn account(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
     let t = Tokens::get(ui.ctx());
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
@@ -1205,6 +1235,8 @@ fn account(app: &mut SlideApp, ui: &mut Ui) {
             ui.add_space(16.0);
             heading(ui, "User Information");
             dim(ui, "DeckCraft has no accounts: there is nothing to sign in to, and your presentations stay on your device.");
+            ui.add_space(16.0);
+            reset_settings(app, ui, bs);
         });
         ui.add_space(40.0);
         ui.vertical(|ui| {
@@ -1231,6 +1263,197 @@ fn account(app: &mut SlideApp, ui: &mut Ui) {
             ui.hyperlink_to("Source on GitHub", deckcraft_engine::links::GITHUB);
         });
     });
+}
+
+/// Account › Reset all settings, with a confirmation in place.
+fn reset_settings(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
+    heading(ui, "Reset");
+    if !bs.confirm_reset {
+        dim(ui, "Put the appearance, editing options, keyboard shortcuts and window layout back to how DeckCraft ships.");
+        ui.add_space(6.0);
+        if ui.button("Reset all settings…").clicked() {
+            bs.confirm_reset = true;
+        }
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    ui.label(RichText::new("Reset every setting? Your presentations and recent files stay; this can't be undone.").color(t.text));
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        if ui.add(egui::Button::new(RichText::new("Reset").color(t.accent_text)).fill(t.accent)).clicked() {
+            let _ = app.run("app.resetSettings", json!({}));
+            bs.confirm_reset = false;
+            app.set_status("All settings are back to their defaults");
+        }
+        if ui.button("Cancel").clicked() {
+            bs.confirm_reset = false;
+        }
+    });
+}
+
+/// Keyboard Shortcuts (#127): every command and slide-show action with its keys. Each key can be
+/// removed, a new one recorded with +, and an action or everything reset. A recorded key another
+/// action has asks before it moves.
+fn shortcuts(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
+    use crate::keymap::{Combo, Scope};
+    let t = Tokens::get(ui.ctx());
+    record_key(app, ui, bs);
+    dim(
+        ui,
+        "Give any command your own keyboard keys. Custom keys are checked first; an action's built-in keys stop working once you change its keys.",
+    );
+    ui.add_space(10.0);
+    ui.horizontal(|ui| {
+        for (show, label) in [(false, "Editor"), (true, "Slide Show")] {
+            if ui.add(egui::Button::selectable(bs.keys_show == show, label).min_size(vec2(96.0, 26.0))).clicked() {
+                bs.keys_show = show;
+                bs.recording = None;
+                bs.clash = None;
+            }
+        }
+        ui.add_space(16.0);
+        ui.add(egui::TextEdit::singleline(&mut bs.query).hint_text("Search commands or keys").desired_width(240.0));
+        if !bs.keys_show {
+            ui.checkbox(&mut bs.keys_bound_only, "Only commands with keys");
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let any = !app.ui.keymap.0.is_empty();
+            if ui.add_enabled(any, egui::Button::new("Reset all shortcuts")).clicked() {
+                let _ = app.run("keys.reset", json!({}));
+                bs.clash = None;
+            }
+        });
+    });
+    if !bs.keys_show {
+        dim(ui, "Editor shortcuts need Ctrl, Alt or a function key, so typing stays typing.");
+    }
+    if let Some(note) = &bs.key_note {
+        ui.label(RichText::new(note.as_str()).color(t.accent));
+    }
+    if let Some((id, keys, msg)) = bs.clash.clone() {
+        ui.add_space(6.0);
+        egui::Frame::NONE.fill(t.card).stroke(Stroke::new(1.0, t.accent)).corner_radius(CornerRadius::same(6)).inner_margin(10).show(ui, |ui| {
+            ui.label(RichText::new(msg).color(t.text));
+            ui.horizontal(|ui| {
+                if ui.add(egui::Button::new(RichText::new("Move it here").color(t.accent_text)).fill(t.accent)).clicked() {
+                    let _ = app.run("keys.set", json!({"action": id, "keys": keys, "replace": true}));
+                    bs.clash = None;
+                }
+                if ui.button("Cancel").clicked() {
+                    bs.clash = None;
+                }
+            });
+        });
+    }
+    ui.add_space(10.0);
+    let scope = if bs.keys_show { Scope::Show } else { Scope::Editor };
+    let q = bs.query.trim().to_lowercase();
+    let mut rows: Vec<_> = crate::keymap::actions().into_iter().filter(|a| a.scope == scope).collect();
+    rows.sort_by(|a, b| a.group.cmp(&b.group).then(a.label.cmp(&b.label)));
+    let km = app.ui.keymap.clone();
+    let mut edits: Vec<(String, Vec<String>)> = vec![];
+    let mut resets: Vec<String> = vec![];
+    egui::Grid::new("shortcut_rows").num_columns(3).striped(true).spacing(vec2(18.0, 6.0)).min_col_width(80.0).show(ui, |ui| {
+        for a in &rows {
+            let keys = km.keys_of(a);
+            let hay = format!("{} {} {} {}", a.label, a.id, a.group, keys.iter().map(Combo::display).collect::<Vec<_>>().join(" ")).to_lowercase();
+            if (!q.is_empty() && !hay.contains(&q))
+                || (scope == Scope::Editor && bs.keys_bound_only && q.is_empty() && keys.is_empty() && !km.is_custom(&a.id))
+            {
+                continue;
+            }
+            ui.vertical(|ui| {
+                ui.set_min_width(300.0);
+                ui.label(RichText::new(&a.label).color(t.text));
+                ui.label(RichText::new(format!("{} · {}", a.group, a.id)).font(theme::font(11.0)).color(t.text_faint));
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.set_max_width(420.0);
+                for k in &keys {
+                    let chip = ui.add(egui::Button::new(format!("{}  ×", k.display())).corner_radius(CornerRadius::same(10)));
+                    chip.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Remove {} from {}", k.display(), a.label))
+                    });
+                    if chip.on_hover_text("Remove this key").clicked() {
+                        edits.push((a.id.clone(), keys.iter().filter(|x| *x != k).map(Combo::spec).collect()));
+                    }
+                }
+                if bs.recording.as_deref() == Some(a.id.as_str()) {
+                    ui.label(RichText::new("Press the new keys… (Esc cancels)").color(t.accent));
+                } else if keys.len() < crate::keymap::MAX_KEYS {
+                    let add = ui.button("+").on_hover_text("Add a key");
+                    add.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Add a key to {}", a.label)));
+                    if add.clicked() {
+                        add.surrender_focus();
+                        bs.recording = Some(a.id.clone());
+                        bs.clash = None;
+                        bs.key_note = None;
+                    }
+                }
+            });
+            if km.is_custom(&a.id) {
+                if ui
+                    .link("Reset")
+                    .on_hover_text(format!(
+                        "Back to {}",
+                        if a.defaults.is_empty() {
+                            "no key".to_string()
+                        } else {
+                            a.defaults.iter().map(Combo::display).collect::<Vec<_>>().join(", ")
+                        }
+                    ))
+                    .clicked()
+                {
+                    resets.push(a.id.clone());
+                }
+            } else {
+                ui.label("");
+            }
+            ui.end_row();
+        }
+    });
+    for (id, keys) in edits {
+        let _ = app.run("keys.set", json!({"action": id, "keys": keys}));
+    }
+    for id in resets {
+        let _ = app.run("keys.reset", json!({"action": id}));
+    }
+}
+
+/// While an action is recording: the next key press becomes one of its keys (Esc cancels).
+fn record_key(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
+    use crate::keymap::Combo;
+    let Some(id) = bs.recording.clone() else { return };
+    let presses: Vec<(egui::Key, egui::Modifiers)> = ui.input(|i| {
+        i.events
+            .iter()
+            .filter_map(|e| if let egui::Event::Key { key, pressed: true, modifiers, .. } = e { Some((*key, *modifiers)) } else { None })
+            .collect()
+    });
+    let Some((key, m)) = presses.into_iter().next() else { return };
+    bs.recording = None;
+    if key == egui::Key::Escape && m.is_none() {
+        return;
+    }
+    let c = Combo::from_egui(key, m);
+    let Some(a) = crate::keymap::actions().into_iter().find(|a| a.id == id) else { return };
+    if a.scope == crate::keymap::Scope::Editor && !c.ok_for_editor() {
+        bs.key_note = Some(format!("{} can't be an editor shortcut: add Ctrl, Alt or use a function key.", c.display()));
+        return;
+    }
+    let mut keys: Vec<String> = app.ui.keymap.keys_of(&a).iter().map(Combo::spec).collect();
+    if keys.contains(&c.spec()) {
+        return;
+    }
+    keys.push(c.spec());
+    match app.run("keys.set", json!({"action": id, "keys": keys})) {
+        Ok(_) => bs.key_note = None,
+        Err(e) if e.contains("replace: true") => {
+            let msg = e.split(';').next().unwrap_or(&e).to_string();
+            bs.clash = Some((id, keys, format!("{msg}. Move it to {}?", a.label)));
+        }
+        Err(e) => bs.key_note = Some(e),
+    }
 }
 
 /// Width of Account's left column: three theme cards side by side.

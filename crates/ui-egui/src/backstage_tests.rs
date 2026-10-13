@@ -89,7 +89,7 @@ fn page_ids_round_trip_and_unknown_ids_are_refused() {
     assert_eq!(Page::parse(""), None);
     let (top, bottom) = entries(false);
     assert_eq!(top, vec![Nav::Page(Page::Home), Nav::Page(Page::New), Nav::Page(Page::Open)], "the start screen has no presentation pages");
-    assert_eq!(bottom, vec![Nav::Page(Page::Account), Nav::Options]);
+    assert_eq!(bottom, vec![Nav::Page(Page::Account), Nav::Page(Page::Shortcuts), Nav::Options]);
     assert_eq!(entries(true).0.len(), 9);
     assert_eq!(split_path("/home/me/Talk.pptx"), ("Talk.pptx".into(), "/home/me".into()));
     assert_eq!(format_bytes(512), "512 bytes");
@@ -510,4 +510,133 @@ fn the_theme_is_saved_with_the_ui_state() {
     // Settings saved before themes existed still load, as Standard.
     let old: crate::UiState = serde_json::from_value(json!({"brightness": "dark", "tab": "Home"})).unwrap();
     assert_eq!((old.ui_theme, old.brightness), (theme::UiTheme::Standard, theme::Brightness::Dark));
+}
+
+// ---------- Keyboard shortcuts (File › Keyboard Shortcuts, #127) and Reset all settings ----------
+
+fn ctrl_alt() -> Modifiers {
+    Modifiers { ctrl: true, alt: true, command: true, ..Modifiers::NONE }
+}
+
+/// Ctrl+Alt+Shift (Ctrl+Alt+G and Ctrl+Alt+Shift+G are taken; Ctrl+Alt+Shift+J is free).
+fn ctrl_alt_shift() -> Modifiers {
+    Modifiers { shift: true, ..ctrl_alt() }
+}
+
+/// A custom key runs its action in the editor, and the action's built-in key stops working.
+#[test]
+fn a_custom_editor_key_replaces_the_built_in_one() {
+    let mut h = harness(new_app());
+    h.state_mut().run("keys.set", json!({"action": "view.gridlines", "keys": ["Cmd+Alt+Shift+J"]})).unwrap();
+    assert!(!h.state().ui.gridlines);
+    h.key_press_modifiers(ctrl_alt_shift(), Key::J);
+    h.run_steps(2);
+    assert!(h.state().ui.gridlines, "Ctrl+Alt+Shift+J toggles the gridlines");
+    h.key_press_modifiers(Modifiers::SHIFT, Key::F9);
+    h.run_steps(2);
+    assert!(h.state().ui.gridlines, "Shift+F9 no longer does");
+    h.state_mut().run("keys.reset", json!({})).unwrap();
+    h.key_press_modifiers(Modifiers::SHIFT, Key::F9);
+    h.run_steps(2);
+    assert!(!h.state().ui.gridlines, "after a reset Shift+F9 works again");
+}
+
+/// Ctrl+C arrives as a Copy event too: once Copy has other keys, the event no longer copies.
+#[test]
+fn a_moved_copy_key_no_longer_copies() {
+    let mut h = harness(new_app());
+    let title = h.state().session.active().unwrap().doc.slides[0].shapes[0].id.0;
+    h.state_mut().session.execute("text.edit", &json!({"id": title})).unwrap();
+    h.state_mut().session.type_text("Aurora").unwrap();
+    h.state_mut().session.key("Escape", deckcraft_engine::Mods::default()).unwrap();
+    h.state_mut().run("keys.set", json!({"action": "edit.copy", "keys": ["Cmd+Alt+C"]})).unwrap();
+    h.event(egui::Event::Copy);
+    h.run_steps(2);
+    assert_eq!(h.state().session.clipboard.plain, "", "the Copy event was dropped");
+    h.key_press_modifiers(ctrl_alt(), Key::C);
+    h.run_steps(2);
+    assert_eq!(h.state().session.clipboard.plain, "Aurora", "Ctrl+Alt+C copies");
+}
+
+/// Slide-show keys can be remapped to plain keys.
+#[test]
+fn a_custom_show_key_advances_the_show() {
+    let mut app = new_app();
+    app.session.execute("slide.new", &json!({})).unwrap();
+    app.session.execute("slide.new", &json!({})).unwrap();
+    app.run("keys.set", json!({"action": "show:next", "keys": ["X"]})).unwrap();
+    let mut h = harness(app);
+    h.state_mut().start_show(0, true);
+    h.run_steps(3);
+    let slide = |h: &Harness<'_, SlideApp>| h.state().show.as_ref().map(|s| s.state.slide);
+    assert_eq!(slide(&h), Some(0));
+    h.key_press(Key::Space);
+    h.run_steps(3);
+    assert_eq!(slide(&h), Some(0), "Space no longer advances");
+    h.key_press(Key::X);
+    h.run_steps(3);
+    assert_eq!(slide(&h), Some(1), "X does");
+}
+
+/// The page records a key from a real key press, and asks before taking one another command has.
+#[test]
+fn the_shortcuts_page_records_keys_and_asks_before_moving_one() {
+    let mut h = harness(new_app());
+    h.state_mut().run("app.backstage", json!({"page": "shortcuts"})).unwrap();
+    h.run_steps(3);
+    assert_eq!(page(&h), Some(Page::Shortcuts));
+    h.state_mut().backstage.as_mut().unwrap().query = "gridlines".into();
+    h.run_steps(2);
+    h.get_by_label("Add a key to Gridlines").click();
+    h.run_steps(2);
+    assert_eq!(h.state().backstage.as_ref().unwrap().recording.as_deref(), Some("view.gridlines"));
+    h.key_press_modifiers(ctrl_alt_shift(), Key::J);
+    h.run_steps(3);
+    let keys = |h: &Harness<'_, SlideApp>| h.state().ui.keymap.0.get("view.gridlines").cloned();
+    assert_eq!(keys(&h), Some(vec!["Shift+F9".to_string(), "Cmd+Alt+Shift+J".to_string()]));
+    assert_eq!(page(&h), Some(Page::Shortcuts), "recording swallowed the key: nothing else ran");
+
+    // Ctrl+O belongs to Open: the page asks, and only moves it when told to.
+    h.get_by_label("Add a key to Gridlines").click();
+    h.run_steps(2);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::O);
+    h.run_steps(3);
+    assert!(h.state().backstage.as_ref().unwrap().clash.is_some());
+    assert_eq!(keys(&h).map(|k| k.len()), Some(2), "nothing moved yet");
+    h.get_by_label("Move it here").click();
+    h.run_steps(3);
+    assert!(keys(&h).unwrap().contains(&"Cmd+O".to_string()));
+    assert_eq!(h.state().ui.keymap.0.get("app.openDialog"), Some(&vec![]), "Open gave up Ctrl+O");
+
+    // An editor shortcut without Ctrl or Alt is refused.
+    h.get_by_label("Add a key to Gridlines").click();
+    h.run_steps(2);
+    h.key_press(Key::K);
+    h.run_steps(3);
+    assert!(h.state().backstage.as_ref().unwrap().key_note.is_some());
+    assert_eq!(keys(&h).map(|k| k.len()), Some(3));
+}
+
+/// Account › Reset all settings asks first, then puts everything back but the recent files.
+#[test]
+fn reset_all_settings_asks_then_resets_but_keeps_recent_files() {
+    let mut app = new_app();
+    app.ui.recent = vec!["talk.pptx".into()];
+    app.run("view.uiTheme", json!({"theme": "highContrast"})).unwrap();
+    app.run("view.dark", json!({"on": true})).unwrap();
+    app.run("keys.set", json!({"action": "edit.copy", "keys": ["Cmd+Alt+C"]})).unwrap();
+    app.session.prefs.smart_quotes = false;
+    let mut h = harness(app);
+    h.state_mut().run("app.backstage", json!({"page": "account"})).unwrap();
+    h.run_steps(3);
+    h.get_by_label("Reset all settings…").click();
+    h.run_steps(2);
+    assert_eq!(h.state().ui.ui_theme, theme::UiTheme::HighContrast, "nothing happens before confirming");
+    click_on_page(&h, "Reset");
+    h.run_steps(3);
+    let app = h.state();
+    assert_eq!((app.ui.ui_theme, app.ui.brightness), (theme::UiTheme::Standard, theme::Brightness::Light));
+    assert!(app.ui.keymap.0.is_empty() && app.session.prefs.smart_quotes);
+    assert_eq!(app.ui.recent, vec!["talk.pptx".to_string()]);
+    assert!(!Tokens::get(&h.ctx).high_contrast, "the look is reset too");
 }

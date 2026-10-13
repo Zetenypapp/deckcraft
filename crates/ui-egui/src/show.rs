@@ -278,6 +278,8 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     let mut actions: Vec<ShowAction> = vec![];
     for (k, m) in keys {
         use egui::Key::*;
+        // Custom slide-show keys (File › Keyboard Shortcuts) map onto the built-in ones.
+        let Some((k, m)) = app.ui.keymap.show_key(k, m) else { continue };
         match k {
             Escape | Minus => keep = false,
             ArrowRight | ArrowDown | Space | PageDown | N => {

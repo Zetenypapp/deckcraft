@@ -13,6 +13,7 @@ pub mod credits;
 pub mod dialogs;
 pub mod fillui;
 pub mod icons;
+pub mod keymap;
 pub mod media;
 pub mod menus;
 pub mod panes;
@@ -83,6 +84,8 @@ pub struct UiState {
     /// The interface theme (File › Account), in light or dark per `brightness`.
     pub ui_theme: theme::UiTheme,
     pub custom_theme: theme::CustomTheme,
+    /// Custom keyboard shortcuts (File › Keyboard Shortcuts): only the actions the user changed.
+    pub keymap: keymap::Keymap,
     pub tab: String,
     pub ribbon_collapsed: bool,
     pub view: ViewMode,
@@ -113,6 +116,7 @@ impl Default for UiState {
             brightness: theme::Brightness::Light,
             ui_theme: theme::UiTheme::Standard,
             custom_theme: theme::CustomTheme::default(),
+            keymap: keymap::Keymap::default(),
             tab: "Home".into(),
             ribbon_collapsed: false,
             view: ViewMode::Normal,
@@ -180,6 +184,10 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.exportDialog", "Export…", None, "{}"),
     ("app.dialog", "Open Dialog", None, "{id}"),
     ("app.links", "Community Links", None, "{}"),
+    ("keys.list", "Keyboard Shortcuts", None, "{} → [{id, label, group, scope, keys, defaults, custom}]"),
+    ("keys.set", "Set Keyboard Shortcut", None, "{action, keys: [\"Cmd+Shift+K\"…], replace?: bool}"),
+    ("keys.reset", "Reset Keyboard Shortcuts", None, "{action?}"),
+    ("app.resetSettings", "Reset All Settings", None, "{}"),
 ];
 
 pub struct Perf {
@@ -337,6 +345,19 @@ impl SlideApp {
         self.restyle = true;
         let c = self.ui.custom_theme;
         Ok(json!({"theme": self.ui.ui_theme.id(), "tint": theme::hex(c.tint), "accent": theme::hex(c.accent), "strength": c.strength}))
+    }
+
+    /// Ctrl+C, Ctrl+X and Ctrl+V arrive as Copy, Cut and Paste events as well as key presses: when
+    /// the user gave their key to another action, or gave the action other keys, the event is
+    /// dropped and the key press does what the custom keys say.
+    fn clipboard_key_moved(&self, e: &egui::Event) -> bool {
+        let key = match e {
+            egui::Event::Copy => egui::Key::C,
+            egui::Event::Cut => egui::Key::X,
+            _ => egui::Key::V,
+        };
+        let c = keymap::Combo::from_egui(key, egui::Modifiers::COMMAND);
+        self.ui.keymap.hit(keymap::Scope::Editor, &c) != keymap::Hit::Pass
     }
 
     /// The interface colours for the current theme and light/dark choice.
@@ -539,6 +560,17 @@ impl SlideApp {
                 self.restyle = true;
             }
             "view.uiTheme" => return self.set_ui_theme(p),
+            "keys.list" => return Ok(self.ui.keymap.list()),
+            "keys.set" => return self.ui.keymap.set(p),
+            "keys.reset" => return self.ui.keymap.reset(p),
+            "app.resetSettings" => {
+                // Every setting back to how DeckCraft ships; the recent files are a list of the
+                // user's documents, not a setting, so they stay.
+                let recent = std::mem::take(&mut self.ui.recent);
+                self.ui = UiState { recent, ..UiState::default() };
+                self.session.prefs = deckcraft_engine::Prefs::default();
+                self.restyle = true;
+            }
             "view.grayscale" => self.ui.grayscale = self.flag(p, self.ui.grayscale),
             "show.start" => {
                 let from = p.get("from").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(0);
@@ -771,6 +803,7 @@ impl SlideApp {
             ctx.set_zoom_factor(scale);
         }
         if !self.styled {
+            self.ui.keymap.sanitize();
             theme::install_fonts_with(ctx, &self.ui_fonts.faces);
             self.styled = true;
             self.restyle = true;
@@ -892,6 +925,9 @@ impl SlideApp {
 
     /// Keyboard and clipboard for the slide (when no text field has focus).
     fn keyboard(&mut self, ctx: &egui::Context) {
+        if self.backstage.as_ref().is_some_and(|b| b.recording.is_some()) {
+            return;
+        }
         if ctx.memory(|m| m.focused().is_some()) || self.dialog.as_ref().is_some_and(|d| d.modal()) || self.palette.is_some() {
             return;
         }
@@ -903,7 +939,19 @@ impl SlideApp {
             for e in events {
                 if let egui::Event::Key { key, pressed: true, modifiers, .. } = e {
                     let mods = Mods { shift: modifiers.shift, alt: modifiers.alt, cmd: modifiers.command || modifiers.ctrl };
-                    if backstage::key(self, key, mods) || !(mods.cmd || mods.alt) || menus::ui_shortcut(self, key, mods) {
+                    if backstage::key(self, key, mods) || !(mods.cmd || mods.alt) {
+                        continue;
+                    }
+                    match self.ui.keymap.hit(keymap::Scope::Editor, &keymap::Combo::from_egui(key, modifiers)) {
+                        // Only app actions: the presentation is hidden behind the File view.
+                        keymap::Hit::Run(id) if id.starts_with("app.") => {
+                            let _ = self.run(&id, json!({}));
+                            continue;
+                        }
+                        keymap::Hit::Run(_) | keymap::Hit::Swallow => continue,
+                        keymap::Hit::Pass => {}
+                    }
+                    if menus::ui_shortcut(self, key, mods) {
                         continue;
                     }
                     // Engine shortcuts that don't touch the hidden slide (Ctrl+N).
@@ -928,6 +976,7 @@ impl SlideApp {
                     }
                 }
                 egui::Event::Ime(ime) => self.ime_event(&ime),
+                egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) if self.clipboard_key_moved(&e) => {}
                 egui::Event::Copy => {
                     if let Ok(v) = self.session.execute("edit.copy", &json!({}))
                         && let Some(t) = v.get("text").and_then(Value::as_str)
@@ -957,6 +1006,14 @@ impl SlideApp {
                 }
                 egui::Event::Key { key, pressed: true, modifiers, .. } => {
                     let mods = Mods { shift: modifiers.shift, alt: modifiers.alt, cmd: modifiers.command || modifiers.ctrl };
+                    match self.ui.keymap.hit(keymap::Scope::Editor, &keymap::Combo::from_egui(key, modifiers)) {
+                        keymap::Hit::Run(id) => {
+                            let _ = self.run(&id, json!({}));
+                            continue;
+                        }
+                        keymap::Hit::Swallow => continue,
+                        keymap::Hit::Pass => {}
+                    }
                     if !self.session.tool.drawing_freeform() && menus::ui_shortcut(self, key, mods) {
                         continue;
                     }

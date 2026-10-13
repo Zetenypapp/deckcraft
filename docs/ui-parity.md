@@ -1,6 +1,6 @@
 # UI parity with PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (interface themes on File › Account; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
@@ -23,6 +23,7 @@ AGENTS.md §2). Dimension score: **~60% ready** (estimated), **30–50 h** to pa
 | Status bar: slide counter, language, notes, comments, views, zoom slider | yes | yes | |
 | Command search (Tell Me) | yes | command palette | #79 default entry fails |
 | Light / dark appearance | follows the system | light or dark; doesn't follow the system (#41) | 1–2 h |
+| Interface themes and high contrast | Office Theme (Colorful, Dark Gray, Black, White) on File › Account; follows the system's high-contrast mode | File › Account (also the title bar's gear): Standard, High Contrast (WCAG AAA text, outlined controls), Lagoon, Sunset and Custom (own tint and accent, text kept readable), each light or dark, with previews (`view.uiTheme`); doesn't follow the system's high-contrast setting | 1–2 h |
 | One window per presentation, New Window, Arrange All | yes | tabs in one window; no New Window | 3–5 h |
 | Quick Access Toolbar customization | yes | no | P1 partial |
 
@@ -51,7 +52,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Share | Cloud sharing | Not offered |
 | Export | Create PDF/XPS Document, Create a Video, Create an Animated GIF, Package Presentation for CD, Create Handouts, Change File Type | Create PDF Document, Create Handouts (a PDF), Change File Type. No video, GIF or CD package |
 | Close | Closes; asks Save / Don't Save / Cancel about unsaved changes | Same (`file.close` after the prompt); Ctrl+W asks too |
-| Account | User information, sign-in, Office Background and Office Theme, product information, About | Appearance (light/dark, `view.dark`), product information, About DeckCraft. No accounts to sign in to |
+| Account | User information, sign-in, Office Background and Office Theme, product information, About | Appearance: light/dark (`view.dark`) and the interface theme, with a preview of each (Standard, High Contrast, Lagoon, Sunset, Custom; `view.uiTheme`); product information, About DeckCraft. No accounts to sign in to |
 | Options | Opens the PowerPoint Options dialog | Opens Preferences |
 
 ## Panes and dialogs
@@ -148,6 +149,7 @@ imitate Microsoft's. No pixel comparison against PowerPoint screenshots has been
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | Interface themes on File › Account, and the title bar's gear that opens it |
 | 2026-10-12 | minor | File tab (Backstage) observed in PowerPoint for Windows and matched (#76); the start screen is File › Home |
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |

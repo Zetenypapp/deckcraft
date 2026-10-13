@@ -80,6 +80,9 @@ pub enum ViewMode {
 #[serde(default, rename_all = "camelCase")]
 pub struct UiState {
     pub brightness: theme::Brightness,
+    /// The interface theme (File › Account), in light or dark per `brightness`.
+    pub ui_theme: theme::UiTheme,
+    pub custom_theme: theme::CustomTheme,
     pub tab: String,
     pub ribbon_collapsed: bool,
     pub view: ViewMode,
@@ -108,6 +111,8 @@ impl Default for UiState {
     fn default() -> Self {
         UiState {
             brightness: theme::Brightness::Light,
+            ui_theme: theme::UiTheme::Standard,
+            custom_theme: theme::CustomTheme::default(),
             tab: "Home".into(),
             ribbon_collapsed: false,
             view: ViewMode::Normal,
@@ -150,6 +155,12 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("view.tab", "Ribbon Tab", None, "{tab}"),
     ("view.collapseRibbon", "Collapse the Ribbon", Some("Cmd+F1"), "{}"),
     ("view.dark", "Dark Mode", None, "{on?: bool}"),
+    (
+        "view.uiTheme",
+        "Interface Theme",
+        None,
+        "{theme?: standard|highContrast|lagoon|sunset|custom, tint?: #rrggbb, accent?: #rrggbb, strength?: 0-1}",
+    ),
     ("view.grayscale", "Grayscale", None, "{on?: bool}"),
     ("show.start", "Slide Show", Some("F5"), "{from?: index}"),
     ("show.presenter", "Presenter View", None, "{on?: bool}"),
@@ -296,6 +307,41 @@ impl SlideApp {
 
     pub(crate) fn docs_key(&self) -> (usize, Option<usize>) {
         (self.session.documents().len(), self.session.active_index())
+    }
+
+    /// `view.uiTheme`: the interface theme and the Custom theme's colours. Setting a custom
+    /// colour without a theme switches to Custom.
+    fn set_ui_theme(&mut self, p: &Value) -> Result<Value, String> {
+        let colour = |k: &str| -> Result<Option<[u8; 3]>, String> {
+            match p.get(k) {
+                None | Some(Value::Null) => Ok(None),
+                Some(v) => v.as_str().and_then(theme::parse_hex).map(Some).ok_or_else(|| format!("`{k}` must be a colour like \"#1f6fb8\"")),
+            }
+        };
+        let (tint, accent) = (colour("tint")?, colour("accent")?);
+        let strength = match p.get("strength") {
+            None | Some(Value::Null) => None,
+            Some(v) => Some(v.as_f64().filter(|s| s.is_finite()).ok_or("`strength` must be a number from 0 to 1")?.clamp(0.0, 1.0) as f32),
+        };
+        let theme = match p.get("theme").and_then(Value::as_str) {
+            Some(id) => Some(theme::UiTheme::from_id(id).ok_or_else(|| format!("unknown interface theme `{id}`"))?),
+            None if p.get("theme").is_some_and(|v| !v.is_null()) => return Err("`theme` must be a theme id".into()),
+            None => None,
+        };
+        let custom = &mut self.ui.custom_theme;
+        custom.tint = tint.unwrap_or(custom.tint);
+        custom.accent = accent.unwrap_or(custom.accent);
+        custom.strength = strength.unwrap_or(custom.strength);
+        self.ui.ui_theme =
+            theme.unwrap_or(if tint.is_some() || accent.is_some() || strength.is_some() { theme::UiTheme::Custom } else { self.ui.ui_theme });
+        self.restyle = true;
+        let c = self.ui.custom_theme;
+        Ok(json!({"theme": self.ui.ui_theme.id(), "tint": theme::hex(c.tint), "accent": theme::hex(c.accent), "strength": c.strength}))
+    }
+
+    /// The interface colours for the current theme and light/dark choice.
+    pub fn tokens(&self) -> theme::Tokens {
+        theme::Tokens::build(self.ui.ui_theme, self.ui.brightness, &self.ui.custom_theme)
     }
 
     /// The File tab's view is open over a presentation (not just the start screen with nothing
@@ -492,6 +538,7 @@ impl SlideApp {
                 self.ui.brightness = if on { theme::Brightness::Dark } else { theme::Brightness::Light };
                 self.restyle = true;
             }
+            "view.uiTheme" => return self.set_ui_theme(p),
             "view.grayscale" => self.ui.grayscale = self.flag(p, self.ui.grayscale),
             "show.start" => {
                 let from = p.get("from").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(0);
@@ -731,7 +778,7 @@ impl SlideApp {
             self.fonts_ready = true;
         }
         if self.restyle {
-            theme::apply(ctx, &theme::Tokens::for_brightness(self.ui.brightness));
+            theme::apply(ctx, &self.tokens());
             self.restyle = false;
         }
         let now = ctx.input(|i| i.time);

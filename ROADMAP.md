@@ -128,6 +128,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | What landed |
 |---|---|
+| 2026-10-13 | Interface themes on File › Account (Office Theme's place): High Contrast, Lagoon, Sunset and Custom in light and dark, with previews and contrast checks; a gear in the title bar opens it |
 | 2026-10-12 | Objects off the slide show and can be selected and moved around it in Normal view, as in PowerPoint; the show, exports and thumbnails still clip to the slide (#270) |
 | 2026-10-12 | Korean, Japanese and Chinese input: IME composition shown in place and underlined, one undo step per composition, candidate window at the caret (slide text, notes, fields); interface text (title, notes, outline, sections, comments) borrows installed fonts for scripts the interface fonts lack (#101) |
 | 2026-10-12 | Selection Pane like PowerPoint (#133): front-most first, groups fold, drag and drop restacks among siblings, Bring Forward / Send Backward, Show All / Hide All, eye, rename in place, keyboard; Lock (pane padlock, canvas menu) keeps objects from moving, sizing or rotating and round-trips PowerPoint's locking attributes |

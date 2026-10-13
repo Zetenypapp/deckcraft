@@ -81,10 +81,10 @@ pub enum ViewMode {
 #[serde(default, rename_all = "camelCase")]
 pub struct UiState {
     pub brightness: theme::Brightness,
-    /// The interface theme (File › Account), in light or dark per `brightness`.
+    /// The interface theme (File › Settings › Themes), in light or dark per `brightness`.
     pub ui_theme: theme::UiTheme,
     pub custom_theme: theme::CustomTheme,
-    /// Custom keyboard shortcuts (File › Keyboard Shortcuts): only the actions the user changed.
+    /// Custom keyboard shortcuts (File › Settings › Keyboard Shortcuts): only the actions the user changed.
     pub keymap: keymap::Keymap,
     pub tab: String,
     pub ribbon_collapsed: bool,
@@ -170,7 +170,12 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("show.presenter", "Presenter View", None, "{on?: bool}"),
     ("show.end", "End Show", None, "{}"),
     ("app.home", "Home", None, "{on?}"),
-    ("app.backstage", "File", Some("Alt+F"), "{page?: home|new|open|info|saveAs|print|export|account, on?: bool}"),
+    (
+        "app.backstage",
+        "File",
+        Some("Alt+F"),
+        "{page?: home|new|open|info|saveAs|print|export|account|settings, tab?: themes|shortcuts|reset, on?: bool}",
+    ),
     ("app.closePresentation", "Close", Some("Cmd+W"), "{}"),
     ("app.print", "Print", Some("Cmd+P"), "{layout?, perPage?, slides?, includeHidden?, frame?}"),
     ("app.about", "About DeckCraft", None, "{}"),
@@ -601,7 +606,14 @@ impl SlideApp {
                 if page.needs_doc() && self.session.active().is_none() {
                     return Err(format!("File › {} needs an open presentation", page.label()));
                 }
+                let tab = match p.get("tab").and_then(Value::as_str) {
+                    Some(id) => Some(backstage::SettingsTab::parse(id).ok_or_else(|| format!("unknown Settings tab `{id}`"))?),
+                    None => None,
+                };
                 self.open_backstage(page);
+                if let (Some(tab), Some(b)) = (tab, self.backstage.as_mut()) {
+                    b.open_tab(tab);
+                }
                 return Ok(json!({"page": page.id()}));
             }
             "app.closePresentation" => self.close_presentation(),

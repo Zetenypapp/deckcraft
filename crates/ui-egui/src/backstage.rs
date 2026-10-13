@@ -37,13 +37,13 @@ pub enum Page {
     Print,
     Export,
     Account,
-    /// Keyboard Shortcuts: the user's own keys (#127).
-    Shortcuts,
+    /// Settings: interface themes, keyboard shortcuts (#127) and Reset, one tab each.
+    Settings,
 }
 
 impl Page {
     pub const ALL: [Page; 9] =
-        [Page::Home, Page::New, Page::Open, Page::Info, Page::SaveAs, Page::Print, Page::Export, Page::Account, Page::Shortcuts];
+        [Page::Home, Page::New, Page::Open, Page::Info, Page::SaveAs, Page::Print, Page::Export, Page::Account, Page::Settings];
 
     /// The id `app.backstage {page}` takes.
     pub fn id(self) -> &'static str {
@@ -56,7 +56,7 @@ impl Page {
             Page::Print => "print",
             Page::Export => "export",
             Page::Account => "account",
-            Page::Shortcuts => "shortcuts",
+            Page::Settings => "settings",
         }
     }
 
@@ -76,7 +76,7 @@ impl Page {
             Page::Print => "Print",
             Page::Export => "Export",
             Page::Account => "Account",
-            Page::Shortcuts => "Shortcuts",
+            Page::Settings => "Settings",
         }
     }
 
@@ -90,13 +90,54 @@ impl Page {
             Page::Print => Icon::Print,
             Page::Export => Icon::Export,
             Page::Account => Icon::Account,
-            Page::Shortcuts => Icon::Keyboard,
+            Page::Settings => Icon::Settings,
         }
     }
 
     /// Pages about the open presentation (hidden on the start screen).
     pub fn needs_doc(self) -> bool {
         matches!(self, Page::Info | Page::SaveAs | Page::Print | Page::Export)
+    }
+}
+
+/// A tab of File › Settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsTab {
+    Themes,
+    Shortcuts,
+    Reset,
+}
+
+impl SettingsTab {
+    pub const ALL: [SettingsTab; 3] = [SettingsTab::Themes, SettingsTab::Shortcuts, SettingsTab::Reset];
+
+    /// The id `app.backstage {page: "settings", tab}` takes.
+    pub fn id(self) -> &'static str {
+        match self {
+            SettingsTab::Themes => "themes",
+            SettingsTab::Shortcuts => "shortcuts",
+            SettingsTab::Reset => "reset",
+        }
+    }
+
+    pub fn parse(id: &str) -> Option<SettingsTab> {
+        SettingsTab::ALL.into_iter().find(|t| t.id().eq_ignore_ascii_case(id))
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SettingsTab::Themes => "Themes",
+            SettingsTab::Shortcuts => "Keyboard Shortcuts",
+            SettingsTab::Reset => "Reset",
+        }
+    }
+
+    fn icon(self) -> Icon {
+        match self {
+            SettingsTab::Themes => Icon::Palette,
+            SettingsTab::Shortcuts => Icon::Keyboard,
+            SettingsTab::Reset => Icon::Undo,
+        }
     }
 }
 
@@ -135,7 +176,7 @@ pub fn entries(has_doc: bool) -> (Vec<Nav>, Vec<Nav>) {
     if has_doc {
         top.extend([Nav::Page(Page::Info), Nav::Save, Nav::Page(Page::SaveAs), Nav::Page(Page::Print), Nav::Page(Page::Export), Nav::Close]);
     }
-    (top, vec![Nav::Page(Page::Account), Nav::Page(Page::Shortcuts), Nav::Options])
+    (top, vec![Nav::Page(Page::Account), Nav::Page(Page::Settings), Nav::Options])
 }
 
 /// Print page: which slides.
@@ -178,6 +219,8 @@ pub struct Backstage {
     pub file_type: &'static str,
     pub handouts_per_page: u8,
     pub pdf_hidden: bool,
+    /// Settings: the open tab.
+    pub settings_tab: SettingsTab,
     /// Keyboard Shortcuts: the slide-show list instead of the editor's.
     pub keys_show: bool,
     /// Keyboard Shortcuts: only actions that have a key.
@@ -189,7 +232,7 @@ pub struct Backstage {
     pub clash: Option<(String, Vec<String>, String)>,
     /// Keyboard Shortcuts: why the last recorded key was refused.
     pub key_note: Option<String>,
-    /// Account: Reset all settings asked to be confirmed.
+    /// Settings › Reset: Reset all settings asked to be confirmed.
     pub confirm_reset: bool,
 }
 
@@ -211,6 +254,7 @@ impl Backstage {
             file_type: "pptx",
             handouts_per_page: 3,
             pdf_hidden: false,
+            settings_tab: SettingsTab::Themes,
             keys_show: false,
             keys_bound_only: true,
             recording: None,
@@ -231,6 +275,18 @@ impl Backstage {
             self.confirm_reset = false;
         }
         self.page = page;
+    }
+
+    /// Show Settings' `tab`, as a click in its list does.
+    pub fn open_tab(&mut self, tab: SettingsTab) {
+        if self.settings_tab != tab {
+            self.query.clear();
+            self.recording = None;
+            self.clash = None;
+            self.key_note = None;
+            self.confirm_reset = false;
+        }
+        self.settings_tab = tab;
     }
 }
 
@@ -428,8 +484,8 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                     Page::SaveAs => save_as(app, ui, &mut bs, &mut out),
                     Page::Print => print(app, ui, &mut bs),
                     Page::Export => export(app, ui, &mut bs),
-                    Page::Account => account(app, ui, &mut bs),
-                    Page::Shortcuts => shortcuts(app, ui, &mut bs),
+                    Page::Account => account(app, ui),
+                    Page::Settings => settings(app, ui, &mut bs),
                 }
             });
         });
@@ -1223,20 +1279,28 @@ fn bullets(ui: &mut Ui, items: &[&str]) {
     ui.add_space(10.0);
 }
 
-/// Account: the interface's appearance and what DeckCraft is. DeckCraft has no accounts, so
-/// there is nothing to sign in to.
-fn account(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
+/// Account: what DeckCraft is. DeckCraft has no accounts, so there is nothing to sign in to.
+fn account(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
-            ui.set_width(THEMES_W);
+            ui.set_width(340.0);
             heading(ui, "Appearance");
-            appearance(app, ui, &t);
+            let dark = app.ui.brightness == theme::Brightness::Dark;
+            egui::ComboBox::from_id_salt("backstage_appearance").width(260.0).selected_text(if dark { "Dark" } else { "Light" }).show_ui(ui, |ui| {
+                for (on, label) in [(false, "Light"), (true, "Dark")] {
+                    if ui.selectable_label(dark == on, label).clicked() {
+                        let _ = app.run("view.dark", json!({"on": on}));
+                    }
+                }
+            });
+            ui.add_space(6.0);
+            if arrow_link(ui, "Themes, keyboard shortcuts and more in Settings") {
+                bs_settings(app);
+            }
             ui.add_space(16.0);
             heading(ui, "User Information");
             dim(ui, "DeckCraft has no accounts: there is nothing to sign in to, and your presentations stay on your device.");
-            ui.add_space(16.0);
-            reset_settings(app, ui, bs);
         });
         ui.add_space(40.0);
         ui.vertical(|ui| {
@@ -1265,11 +1329,78 @@ fn account(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
     });
 }
 
-/// Account › Reset all settings, with a confirmation in place.
+/// Account's link to Settings › Themes.
+fn bs_settings(app: &mut SlideApp) {
+    let _ = app.run("app.backstage", json!({"page": "settings", "tab": "themes"}));
+}
+
+/// Settings: a list of tabs on the left (Themes, Keyboard Shortcuts, Reset) and the chosen tab on
+/// the right.
+fn settings(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
+    let t = Tokens::get(ui.ctx());
+    let top = ui.cursor().top();
+    ui.horizontal_top(|ui| {
+        let tabs = ui
+            .vertical(|ui| {
+                ui.set_width(TAB_W);
+                for tab in SettingsTab::ALL {
+                    if settings_tab(ui, tab, bs.settings_tab == tab, &t).clicked() {
+                        bs.open_tab(tab);
+                    }
+                }
+            })
+            .response;
+        let (gap, _) = ui.allocate_exact_size(vec2(33.0, 1.0), Sense::hover());
+        let content = ui
+            .vertical(|ui| {
+                let tab = bs.settings_tab;
+                ui.label(RichText::new(tab.label()).font(theme::bold(16.0)).color(t.text));
+                ui.add_space(8.0);
+                match tab {
+                    SettingsTab::Themes => {
+                        ui.set_max_width(THEMES_W);
+                        appearance(app, ui, &t);
+                    }
+                    SettingsTab::Shortcuts => shortcuts(app, ui, bs),
+                    SettingsTab::Reset => reset_settings(app, ui, bs),
+                }
+            })
+            .response;
+        // The line between the tabs and the tab's content runs as far down as either goes.
+        let bottom = tabs.rect.bottom().max(content.rect.bottom());
+        let x = gap.center().x;
+        ui.painter().line_segment([pos2(x, top), pos2(x, bottom)], Stroke::new(1.0, t.separator));
+    });
+}
+
+/// A tab in Settings' list: an icon and a name; the open one has an accent bar and a shaded row.
+fn settings_tab(ui: &mut Ui, tab: SettingsTab, selected: bool, t: &Tokens) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(TAB_W, 38.0), Sense::click());
+    let label = tab.label();
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label));
+    let p = ui.painter();
+    if selected || resp.hovered() {
+        p.rect_filled(rect, CornerRadius::same(4), t.hover);
+    }
+    if selected {
+        let bar = Rect::from_min_size(rect.min + vec2(0.0, 7.0), vec2(3.0, rect.height() - 14.0));
+        p.rect_filled(bar, CornerRadius::same(1), t.accent);
+    }
+    if resp.has_focus() {
+        p.rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, t.text), StrokeKind::Inside);
+    }
+    let ink = if selected { t.accent } else { t.text };
+    icons::paint(p, Rect::from_center_size(pos2(rect.left() + 22.0, rect.center().y), vec2(16.0, 16.0)), tab.icon(), ink, false);
+    let font = if selected { theme::bold(13.5) } else { theme::font(13.5) };
+    p.text(pos2(rect.left() + 42.0, rect.center().y), Align2::LEFT_CENTER, label, font, t.text);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Settings › Reset: Reset all settings, with a confirmation in place.
 fn reset_settings(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
-    heading(ui, "Reset");
     if !bs.confirm_reset {
-        dim(ui, "Put the appearance, editing options, keyboard shortcuts and window layout back to how DeckCraft ships.");
+        dim(ui, "Put the theme, editing options, keyboard shortcuts and window layout back to how DeckCraft ships.");
+        dim(ui, "Your presentations and recent files are not touched.");
         ui.add_space(6.0);
         if ui.button("Reset all settings…").clicked() {
             bs.confirm_reset = true;
@@ -1280,7 +1411,7 @@ fn reset_settings(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
     ui.label(RichText::new("Reset every setting? Your presentations and recent files stay; this can't be undone.").color(t.text));
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        if ui.add(egui::Button::new(RichText::new("Reset").color(t.accent_text)).fill(t.accent)).clicked() {
+        if ui.add(egui::Button::new(RichText::new("Yes, reset everything").color(t.accent_text)).fill(t.accent)).clicked() {
             let _ = app.run("app.resetSettings", json!({}));
             bs.confirm_reset = false;
             app.set_status("All settings are back to their defaults");
@@ -1456,7 +1587,9 @@ fn record_key(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
     }
 }
 
-/// Width of Account's left column: three theme cards side by side.
+/// Width of Settings' tab list.
+const TAB_W: f32 = 210.0;
+/// Width of Settings › Themes: three theme cards side by side.
 const THEMES_W: f32 = 3.0 * THEME_CARD.x + 2.0 * 12.0;
 const THEME_CARD: egui::Vec2 = vec2(170.0, 102.0);
 

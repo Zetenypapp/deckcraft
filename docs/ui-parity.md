@@ -1,6 +1,6 @@
 # UI parity with PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (custom keyboard shortcuts and Reset all settings; interface themes on File › Account; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (custom keyboard shortcuts and Reset all settings; File › Settings with Themes, Keyboard Shortcuts and Reset tabs; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
@@ -23,9 +23,9 @@ AGENTS.md §2). Dimension score: **~60% ready** (estimated), **30–50 h** to pa
 | Status bar: slide counter, language, notes, comments, views, zoom slider | yes | yes | |
 | Command search (Tell Me) | yes | command palette | #79 default entry fails |
 | Light / dark appearance | follows the system | light or dark; doesn't follow the system (#41) | 1–2 h |
-| Custom keyboard shortcuts | no (fixed shortcuts) | File › Keyboard Shortcuts: own keys for any command and the slide-show actions, recorded from a key press, several per action, a warning before taking another action's key, reset per action or all (`keys.list`, `keys.set`, `keys.reset`, #127). Editor keys need Ctrl, Alt or a function key | |
-| Reset all settings | none (delete the registry key or the preference files) | File › Account › Reset all settings, confirmed in place (`app.resetSettings`); recent files stay | |
-| Interface themes and high contrast | Office Theme (Colorful, Dark Gray, Black, White) on File › Account; follows the system's high-contrast mode | File › Account (also the title bar's gear): Standard, High Contrast (WCAG AAA text, outlined controls), Lagoon, Sunset and Custom (own tint and accent, text kept readable), each light or dark, with previews (`view.uiTheme`); doesn't follow the system's high-contrast setting | 1–2 h |
+| Custom keyboard shortcuts | no (fixed shortcuts) | File › Settings › Keyboard Shortcuts: own keys for any command and the slide-show actions, recorded from a key press, several per action, a warning before taking another action's key, reset per action or all (`keys.list`, `keys.set`, `keys.reset`, #127). Editor keys need Ctrl, Alt or a function key | |
+| Reset all settings | none (delete the registry key or the preference files) | File › Settings › Reset, confirmed in place (`app.resetSettings`); recent files stay | |
+| Interface themes and high contrast | Office Theme (Colorful, Dark Gray, Black, White) on File › Account; follows the system's high-contrast mode | File › Settings › Themes (also the title bar’s gear): Standard, High Contrast (WCAG AAA text, outlined controls), Lagoon, Sunset and Custom (own tint and accent, text kept readable), each light or dark, with previews (`view.uiTheme`); doesn't follow the system's high-contrast setting | 1–2 h |
 | One window per presentation, New Window, Arrange All | yes | tabs in one window; no New Window | 3–5 h |
 | Quick Access Toolbar customization | yes | no | P1 partial |
 

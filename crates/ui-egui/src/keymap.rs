@@ -1,4 +1,4 @@
-//! Custom keyboard shortcuts (File › Keyboard Shortcuts, #127): the user's own keys for editor
+//! Custom keyboard shortcuts (File › Settings › Keyboard Shortcuts, #127): the user's own keys for editor
 //! commands and slide-show actions.
 //!
 //! Custom keys are an overlay on the built-in shortcuts (the command registry, the UI's own keys

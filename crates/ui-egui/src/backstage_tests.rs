@@ -89,7 +89,7 @@ fn page_ids_round_trip_and_unknown_ids_are_refused() {
     assert_eq!(Page::parse(""), None);
     let (top, bottom) = entries(false);
     assert_eq!(top, vec![Nav::Page(Page::Home), Nav::Page(Page::New), Nav::Page(Page::Open)], "the start screen has no presentation pages");
-    assert_eq!(bottom, vec![Nav::Page(Page::Account), Nav::Page(Page::Shortcuts), Nav::Options]);
+    assert_eq!(bottom, vec![Nav::Page(Page::Account), Nav::Page(Page::Settings), Nav::Options]);
     assert_eq!(entries(true).0.len(), 9);
     assert_eq!(split_path("/home/me/Talk.pptx"), ("Talk.pptx".into(), "/home/me".into()));
     assert_eq!(format_bytes(512), "512 bytes");
@@ -437,16 +437,17 @@ fn print_slides_follow_the_settings() {
     assert_eq!(print_params(&bs, &[1, 3])["layout"], "handouts");
 }
 
-// ---------- Interface themes (File › Account) ----------
+// ---------- Interface themes (File › Settings › Themes) ----------
 
-/// The title bar's gear opens File › Account, where clicking a theme card switches the interface
+/// The title bar's gear opens File › Settings on its Themes tab, where clicking a theme card switches the interface
 /// theme; Custom shows its colour pickers, and Esc goes back to the slide.
 #[test]
-fn the_gear_opens_account_and_theme_cards_apply() {
+fn the_gear_opens_settings_and_theme_cards_apply() {
     let mut h = harness(new_app());
-    h.get_by_label("Appearance and themes").click();
+    h.get_by_label("Open Settings").click();
     h.run_steps(3);
-    assert_eq!(page(&h), Some(Page::Account));
+    assert_eq!(page(&h), Some(Page::Settings));
+    assert_eq!(h.state().backstage.as_ref().map(|b| b.settings_tab), Some(SettingsTab::Themes));
 
     h.get_by_label("Lagoon").click();
     h.run_steps(3);
@@ -512,7 +513,7 @@ fn the_theme_is_saved_with_the_ui_state() {
     assert_eq!((old.ui_theme, old.brightness), (theme::UiTheme::Standard, theme::Brightness::Dark));
 }
 
-// ---------- Keyboard shortcuts (File › Keyboard Shortcuts, #127) and Reset all settings ----------
+// ---------- Keyboard shortcuts (File › Settings, #127) and Reset all settings ----------
 
 fn ctrl_alt() -> Modifiers {
     Modifiers { ctrl: true, alt: true, command: true, ..Modifiers::NONE }
@@ -582,9 +583,12 @@ fn a_custom_show_key_advances_the_show() {
 #[test]
 fn the_shortcuts_page_records_keys_and_asks_before_moving_one() {
     let mut h = harness(new_app());
-    h.state_mut().run("app.backstage", json!({"page": "shortcuts"})).unwrap();
+    h.state_mut().run("app.backstage", json!({"page": "settings"})).unwrap();
     h.run_steps(3);
-    assert_eq!(page(&h), Some(Page::Shortcuts));
+    assert_eq!(page(&h), Some(Page::Settings));
+    h.get_by_label("Keyboard Shortcuts").click();
+    h.run_steps(3);
+    assert_eq!(h.state().backstage.as_ref().map(|b| b.settings_tab), Some(SettingsTab::Shortcuts));
     h.state_mut().backstage.as_mut().unwrap().query = "gridlines".into();
     h.run_steps(2);
     h.get_by_label("Add a key to Gridlines").click();
@@ -594,7 +598,7 @@ fn the_shortcuts_page_records_keys_and_asks_before_moving_one() {
     h.run_steps(3);
     let keys = |h: &Harness<'_, SlideApp>| h.state().ui.keymap.0.get("view.gridlines").cloned();
     assert_eq!(keys(&h), Some(vec!["Shift+F9".to_string(), "Cmd+Alt+Shift+J".to_string()]));
-    assert_eq!(page(&h), Some(Page::Shortcuts), "recording swallowed the key: nothing else ran");
+    assert_eq!(page(&h), Some(Page::Settings), "recording swallowed the key: nothing else ran");
 
     // Ctrl+O belongs to Open: the page asks, and only moves it when told to.
     h.get_by_label("Add a key to Gridlines").click();
@@ -617,7 +621,7 @@ fn the_shortcuts_page_records_keys_and_asks_before_moving_one() {
     assert_eq!(keys(&h).map(|k| k.len()), Some(3));
 }
 
-/// Account › Reset all settings asks first, then puts everything back but the recent files.
+/// Settings › Reset asks first, then puts everything back but the recent files.
 #[test]
 fn reset_all_settings_asks_then_resets_but_keeps_recent_files() {
     let mut app = new_app();
@@ -627,12 +631,12 @@ fn reset_all_settings_asks_then_resets_but_keeps_recent_files() {
     app.run("keys.set", json!({"action": "edit.copy", "keys": ["Cmd+Alt+C"]})).unwrap();
     app.session.prefs.smart_quotes = false;
     let mut h = harness(app);
-    h.state_mut().run("app.backstage", json!({"page": "account"})).unwrap();
+    h.state_mut().run("app.backstage", json!({"page": "settings", "tab": "reset"})).unwrap();
     h.run_steps(3);
     h.get_by_label("Reset all settings…").click();
     h.run_steps(2);
     assert_eq!(h.state().ui.ui_theme, theme::UiTheme::HighContrast, "nothing happens before confirming");
-    click_on_page(&h, "Reset");
+    click_on_page(&h, "Yes, reset everything");
     h.run_steps(3);
     let app = h.state();
     assert_eq!((app.ui.ui_theme, app.ui.brightness), (theme::UiTheme::Standard, theme::Brightness::Light));

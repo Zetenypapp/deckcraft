@@ -103,42 +103,88 @@ impl Page {
 /// A tab of File › Settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsTab {
+    General,
     Themes,
+    NewPresentations,
     Shortcuts,
-    Reset,
+    Backup,
 }
 
 impl SettingsTab {
-    pub const ALL: [SettingsTab; 3] = [SettingsTab::Themes, SettingsTab::Shortcuts, SettingsTab::Reset];
+    pub const ALL: [SettingsTab; 5] =
+        [SettingsTab::General, SettingsTab::Themes, SettingsTab::NewPresentations, SettingsTab::Shortcuts, SettingsTab::Backup];
 
     /// The id `app.backstage {page: "settings", tab}` takes.
     pub fn id(self) -> &'static str {
         match self {
+            SettingsTab::General => "general",
             SettingsTab::Themes => "themes",
+            SettingsTab::NewPresentations => "new",
             SettingsTab::Shortcuts => "shortcuts",
-            SettingsTab::Reset => "reset",
+            SettingsTab::Backup => "backup",
         }
     }
 
     pub fn parse(id: &str) -> Option<SettingsTab> {
+        if id.eq_ignore_ascii_case("reset") {
+            return Some(SettingsTab::Backup);
+        }
         SettingsTab::ALL.into_iter().find(|t| t.id().eq_ignore_ascii_case(id))
     }
 
     pub fn label(self) -> &'static str {
         match self {
+            SettingsTab::General => "General",
             SettingsTab::Themes => "Themes",
+            SettingsTab::NewPresentations => "New Presentations",
             SettingsTab::Shortcuts => "Keyboard Shortcuts",
-            SettingsTab::Reset => "Reset",
+            SettingsTab::Backup => "Backup and Reset",
         }
     }
 
     fn icon(self) -> Icon {
         match self {
+            SettingsTab::General => Icon::Settings,
             SettingsTab::Themes => Icon::Palette,
+            SettingsTab::NewPresentations => Icon::NewFile,
             SettingsTab::Shortcuts => Icon::Keyboard,
-            SettingsTab::Reset => Icon::Undo,
+            SettingsTab::Backup => Icon::Save,
         }
     }
+}
+
+/// What each Settings tab holds, for its search box: (tab, setting, more words that find it).
+const SETTINGS_INDEX: &[(SettingsTab, &str, &str)] = &[
+    (SettingsTab::General, "Interface size", "zoom scale bigger smaller larger text accessibility"),
+    (SettingsTab::General, "Reduce motion", "animation sliding fading accessibility"),
+    (SettingsTab::General, "When DeckCraft starts", "startup launch open last presentation blank start screen"),
+    (SettingsTab::Themes, "Light or dark", "dark mode night appearance"),
+    (SettingsTab::Themes, "Interface theme", "colour color high contrast lagoon sunset custom accent tint appearance"),
+    (SettingsTab::NewPresentations, "Theme for new presentations", "design default template"),
+    (SettingsTab::NewPresentations, "Slide size", "widescreen 16:9 standard 4:3 aspect"),
+    (SettingsTab::NewPresentations, "Font for new presentations", "typeface default text"),
+    (SettingsTab::NewPresentations, "Default shape", "set as default shape look style"),
+    (SettingsTab::Shortcuts, "Keyboard shortcuts", "keys hotkeys keybindings customise customize"),
+    (SettingsTab::Shortcuts, "Shortcut cheat sheet", "print save copy list"),
+    (SettingsTab::Backup, "Back up settings", "export save file another computer"),
+    (SettingsTab::Backup, "Restore settings", "import load file another computer"),
+    (SettingsTab::Backup, "Reset all settings", "factory defaults"),
+];
+
+/// The settings whose name, tab or extra words contain every word of `query`.
+pub fn settings_search(query: &str) -> Vec<(SettingsTab, &'static str)> {
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    if words.is_empty() {
+        return vec![];
+    }
+    SETTINGS_INDEX
+        .iter()
+        .filter(|(tab, name, more)| {
+            let hay = format!("{} {name} {more}", tab.label()).to_lowercase();
+            words.iter().all(|w| hay.contains(w.as_str()))
+        })
+        .map(|(tab, name, _)| (*tab, *name))
+        .collect()
 }
 
 /// A side-menu entry: a page, or an action that runs at once.
@@ -221,6 +267,8 @@ pub struct Backstage {
     pub pdf_hidden: bool,
     /// Settings: the open tab.
     pub settings_tab: SettingsTab,
+    /// Settings: the search box above the tabs.
+    pub settings_query: String,
     /// Keyboard Shortcuts: the slide-show list instead of the editor's.
     pub keys_show: bool,
     /// Keyboard Shortcuts: only actions that have a key.
@@ -254,7 +302,8 @@ impl Backstage {
             file_type: "pptx",
             handouts_per_page: 3,
             pdf_hidden: false,
-            settings_tab: SettingsTab::Themes,
+            settings_tab: SettingsTab::General,
+            settings_query: String::new(),
             keys_show: false,
             keys_bound_only: true,
             recording: None,
@@ -1334,8 +1383,7 @@ fn bs_settings(app: &mut SlideApp) {
     let _ = app.run("app.backstage", json!({"page": "settings", "tab": "themes"}));
 }
 
-/// Settings: a list of tabs on the left (Themes, Keyboard Shortcuts, Reset) and the chosen tab on
-/// the right.
+/// Settings: a search box and a list of tabs on the left, the chosen tab on the right.
 fn settings(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
     let t = Tokens::get(ui.ctx());
     let top = ui.cursor().top();
@@ -1343,9 +1391,40 @@ fn settings(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
         let tabs = ui
             .vertical(|ui| {
                 ui.set_width(TAB_W);
+                let field = egui::TextEdit::singleline(&mut bs.settings_query).hint_text("Search settings").desired_width(TAB_W - 8.0);
+                let field = ui.add(field);
+                // The hint isn't a name: screen readers get one.
+                field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search settings"));
+                let typed = field.changed();
+                ui.add_space(8.0);
+                let hits = settings_search(&bs.settings_query);
+                let searching = !bs.settings_query.trim().is_empty();
+                // Typing jumps to the first tab with a match, unless the open one has one.
+                if typed
+                    && let Some(first) = hits.first()
+                    && !hits.iter().any(|h| h.0 == bs.settings_tab)
+                {
+                    bs.open_tab(first.0);
+                }
+                if searching && hits.is_empty() {
+                    dim(ui, "No settings match.");
+                }
                 for tab in SettingsTab::ALL {
+                    let found: Vec<&str> = hits.iter().filter(|h| h.0 == tab).map(|h| h.1).collect();
+                    if searching && found.is_empty() {
+                        continue;
+                    }
                     if settings_tab(ui, tab, bs.settings_tab == tab, &t).clicked() {
                         bs.open_tab(tab);
+                    }
+                    for name in found {
+                        ui.horizontal(|ui| {
+                            ui.add_space(42.0);
+                            let l = egui::Label::new(RichText::new(name).font(theme::font(12.0)).color(t.text_dim)).sense(Sense::click());
+                            if ui.add(l).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                                bs.open_tab(tab);
+                            }
+                        });
                     }
                 }
             })
@@ -1357,12 +1436,14 @@ fn settings(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
                 ui.label(RichText::new(tab.label()).font(theme::bold(16.0)).color(t.text));
                 ui.add_space(8.0);
                 match tab {
+                    SettingsTab::General => general_settings(app, ui, &t),
                     SettingsTab::Themes => {
                         ui.set_max_width(THEMES_W);
                         appearance(app, ui, &t);
                     }
+                    SettingsTab::NewPresentations => new_presentation_settings(app, ui, &t),
                     SettingsTab::Shortcuts => shortcuts(app, ui, bs),
-                    SettingsTab::Reset => reset_settings(app, ui, bs),
+                    SettingsTab::Backup => backup_and_reset(app, ui, bs),
                 }
             })
             .response;
@@ -1396,7 +1477,154 @@ fn settings_tab(ui: &mut Ui, tab: SettingsTab, selected: bool, t: &Tokens) -> eg
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// Settings › Reset: Reset all settings, with a confirmation in place.
+/// A setting's name inside a Settings tab.
+fn sub(ui: &mut Ui, text: &str, t: &Tokens) {
+    ui.add_space(14.0);
+    ui.label(RichText::new(text).font(theme::bold(13.5)).color(t.text));
+    ui.add_space(2.0);
+}
+
+/// Settings › General: interface size, reduce motion and what opens at start.
+fn general_settings(app: &mut SlideApp, ui: &mut Ui, t: &Tokens) {
+    use crate::{MAX_UI_SCALE, MIN_UI_SCALE, Startup};
+    ui.set_max_width(640.0);
+    sub(ui, "Interface size", t);
+    dim(ui, "Makes all of DeckCraft bigger or smaller: menus, ribbon, panes and their text. Slides have their own zoom.");
+    ui.add_space(6.0);
+    let scale = app.ui.ui_scale;
+    ui.horizontal(|ui| {
+        for (s, label) in [(0.9, "90%"), (1.0, "100%"), (1.25, "125%"), (1.5, "150%"), (1.75, "175%")] {
+            if ui.add(egui::Button::selectable((scale - s).abs() < 0.005, label).min_size(vec2(56.0, 26.0))).clicked() {
+                let _ = app.run("view.interfaceSize", json!({"scale": s}));
+            }
+        }
+        ui.add_space(14.0);
+        // Five-percent steps from the nearest one.
+        let step = |d: f32| ((scale * 20.0).round() + d) / 20.0;
+        let smaller = egui::Button::new("−").min_size(vec2(26.0, 26.0));
+        if ui.add_enabled(scale > MIN_UI_SCALE + 0.001, smaller).on_hover_text("Smaller").clicked() {
+            let _ = app.run("view.interfaceSize", json!({"scale": step(-1.0)}));
+        }
+        ui.label(RichText::new(format!("{:.0}%", scale * 100.0)).color(t.text));
+        let larger = egui::Button::new("+").min_size(vec2(26.0, 26.0));
+        if ui.add_enabled(scale < MAX_UI_SCALE - 0.001, larger).on_hover_text("Larger").clicked() {
+            let _ = app.run("view.interfaceSize", json!({"scale": step(1.0)}));
+        }
+    });
+
+    sub(ui, "Motion", t);
+    let mut calm = app.ui.reduce_motion;
+    if ui.checkbox(&mut calm, "Reduce motion").changed() {
+        let _ = app.run("view.reduceMotion", json!({"on": calm}));
+    }
+    dim(ui, "Turns off the sliding and fading of DeckCraft's own menus, panes and scrolling. Transitions and animations in your slides still play.");
+
+    sub(ui, "When DeckCraft starts", t);
+    for s in Startup::ALL {
+        if ui.radio(app.ui.startup == s, s.label()).clicked() {
+            let _ = app.run("app.startup", json!({"open": s.id()}));
+        }
+    }
+    dim(ui, "A presentation you open with DeckCraft (by double-clicking it, say) always opens, whatever you pick here.");
+}
+
+/// Settings › New Presentations: the theme, slide size and font new presentations start with,
+/// and the default shape.
+fn new_presentation_settings(app: &mut SlideApp, ui: &mut Ui, t: &Tokens) {
+    dim(ui, "What every new presentation starts with. A theme you pick on the New page wins over the one here.");
+    ui.add_space(12.0);
+    let prefs = app.session.prefs.clone();
+    let themes = deckcraft_model::theme::builtin_themes();
+    let chosen = themes.iter().find(|th| th.name.eq_ignore_ascii_case(&prefs.new_theme)).cloned().unwrap_or_default();
+    let standard = prefs.new_size == "standard";
+    ui.horizontal_top(|ui| {
+        // A preview: the theme, its font and the slide's shape.
+        let mut preview = chosen.clone();
+        if !prefs.new_font.is_empty() {
+            preview.fonts.major.latin = prefs.new_font.clone();
+            preview.fonts.minor.latin = prefs.new_font.clone();
+        }
+        let size = if standard { vec2(144.0, 108.0) } else { vec2(192.0, 108.0) };
+        let (slot, _) = ui.allocate_exact_size(vec2(192.0, 108.0), Sense::hover());
+        let r = Rect::from_center_size(slot.center(), size);
+        crate::ribbon::paint_theme_tile(ui.painter(), r, &preview);
+        ui.painter().rect_stroke(r, CornerRadius::same(2), Stroke::new(1.0, t.border), StrokeKind::Outside);
+        ui.add_space(20.0);
+        egui::Grid::new("new_presentation_defaults").num_columns(2).spacing(vec2(14.0, 10.0)).show(ui, |ui| {
+            ui.label("Theme");
+            egui::ComboBox::from_id_salt("new_presentation_theme").width(240.0).selected_text(chosen.name.clone()).show_ui(ui, |ui| {
+                for th in &themes {
+                    if ui.selectable_label(th.name == chosen.name, th.name.as_str()).clicked() {
+                        let _ = app.run("settings.newPresentation", json!({"theme": th.name}));
+                    }
+                }
+            });
+            ui.end_row();
+            ui.label("Slide size");
+            ui.horizontal(|ui| {
+                for (id, label, on) in [("widescreen", "Widescreen (16:9)", !standard), ("standard", "Standard (4:3)", standard)] {
+                    if ui.add(egui::Button::selectable(on, label).min_size(vec2(0.0, 26.0))).clicked() {
+                        let _ = app.run("settings.newPresentation", json!({"size": id}));
+                    }
+                }
+            });
+            ui.end_row();
+            ui.label("Font");
+            const THEMES_FONTS: &str = "The theme's fonts";
+            let shown = if prefs.new_font.is_empty() { THEMES_FONTS.to_string() } else { prefs.new_font.clone() };
+            egui::ComboBox::from_id_salt("new_presentation_font").width(240.0).height(360.0).selected_text(shown).show_ui(ui, |ui| {
+                if ui.selectable_label(prefs.new_font.is_empty(), THEMES_FONTS).clicked() {
+                    let _ = app.run("settings.newPresentation", json!({"font": ""}));
+                }
+                for f in deckcraft_fonts::FontDb::global().families() {
+                    if ui.selectable_label(prefs.new_font == f, f.as_str()).clicked() {
+                        let _ = app.run("settings.newPresentation", json!({"font": f}));
+                    }
+                }
+            });
+            ui.end_row();
+        });
+    });
+
+    sub(ui, "Default shape", t);
+    if prefs.default_shape.is_some() {
+        dim(ui, "New shapes look like the one you picked with Set as Default Shape, now and the next time you open DeckCraft.");
+        ui.add_space(6.0);
+        if ui.button("Forget the default shape").clicked() {
+            let _ = app.run("settings.newPresentation", json!({"forgetShape": true}));
+        }
+    } else {
+        dim(ui, "Right-click a shape and pick Set as Default Shape: new shapes then look like it, and DeckCraft remembers it next time.");
+    }
+    ui.add_space(18.0);
+    if ui.button("New presentation with these settings").clicked() {
+        let _ = app.run("file.new", json!({}));
+    }
+}
+
+/// Settings › Backup and Reset: settings to and from a file, and Reset all settings.
+fn backup_and_reset(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
+    let t = Tokens::get(ui.ctx());
+    ui.set_max_width(640.0);
+    sub(ui, "Back up and restore", &t);
+    dim(
+        ui,
+        "Keep your theme, keyboard shortcuts, editing options and the rest in one file, to save or to bring to another computer. Recent files aren't included.",
+    );
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        if ui.button("Back up settings…").clicked() {
+            app.backup_settings();
+        }
+        if ui.button("Restore from a backup…").clicked() {
+            app.restore_settings();
+        }
+    });
+    sub(ui, "Reset", &t);
+    reset_settings(app, ui, bs);
+}
+
+/// Settings › Backup and Reset: Reset all settings, with a confirmation in place.
 fn reset_settings(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
     if !bs.confirm_reset {
         dim(ui, "Put the theme, editing options, keyboard shortcuts and window layout back to how DeckCraft ships.");
@@ -1433,6 +1661,17 @@ fn shortcuts(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
         ui,
         "Give any command your own keyboard keys. Custom keys are checked first; an action's built-in keys stop working once you change its keys.",
     );
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        if ui.button("Save cheat sheet…").on_hover_text("A page with all your shortcuts, to print or keep").clicked() {
+            app.save_cheat_sheet();
+        }
+        if ui.button("Copy as text").clicked() {
+            let (text, _) = app.ui.keymap.cheat_sheet();
+            ui.ctx().copy_text(text);
+            app.set_status("Copied all your shortcuts as text");
+        }
+    });
     ui.add_space(10.0);
     ui.horizontal(|ui| {
         for (show, label) in [(false, "Editor"), (true, "Slide Show")] {

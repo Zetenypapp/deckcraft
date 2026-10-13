@@ -100,6 +100,7 @@ fn services() -> Services {
                     &["wav", "mp3", "m4a", "m4b", "aac", "flac", "ogg", "oga", "opus", "aif", "aiff", "aifc", "caf", "wma", "weba", "mka"],
                 ),
                 "video" => d.add_filter("Video", &["mp4", "m4v", "mov", "webm", "mkv", "wmv"]),
+                "settings" => d.add_filter("DeckCraft settings", &["json"]),
                 _ => d
                     .add_filter("Presentations", &["deckcraft", "pptx", "potx", "ppsx"])
                     .add_filter("DeckCraft", &["deckcraft"])
@@ -221,6 +222,8 @@ fn main() -> eframe::Result {
                     log::error!("{f}: {e}");
                 }
             }
+            // Settings › General › When DeckCraft starts (nothing happens when something is open).
+            app.startup();
             if show {
                 app.start_show(0, false);
             }

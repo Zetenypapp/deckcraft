@@ -77,6 +77,44 @@ pub enum ViewMode {
 }
 
 /// Persisted UI state.
+/// What DeckCraft shows when it starts with nothing to open (File › Settings › General).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Startup {
+    /// The File view's Home page, with the recent presentations.
+    #[default]
+    StartScreen,
+    /// The presentation at the top of the recent list.
+    LastFile,
+    /// A new presentation, as New › Blank Presentation makes it.
+    Blank,
+}
+
+impl Startup {
+    pub const ALL: [Startup; 3] = [Startup::StartScreen, Startup::LastFile, Startup::Blank];
+
+    /// The id `app.startup {open}` takes.
+    pub fn id(self) -> &'static str {
+        match self {
+            Startup::StartScreen => "startScreen",
+            Startup::LastFile => "lastFile",
+            Startup::Blank => "blank",
+        }
+    }
+
+    pub fn parse(id: &str) -> Option<Startup> {
+        Startup::ALL.into_iter().find(|s| s.id().eq_ignore_ascii_case(id))
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Startup::StartScreen => "The start screen",
+            Startup::LastFile => "The presentation I had open last",
+            Startup::Blank => "A new blank presentation",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct UiState {
@@ -86,6 +124,10 @@ pub struct UiState {
     pub custom_theme: theme::CustomTheme,
     /// Custom keyboard shortcuts (File › Settings › Keyboard Shortcuts): only the actions the user changed.
     pub keymap: keymap::Keymap,
+    /// File › Settings › General: no sliding or fading in DeckCraft's own interface.
+    pub reduce_motion: bool,
+    /// File › Settings › General: what DeckCraft shows when it starts with nothing to open.
+    pub startup: Startup,
     pub tab: String,
     pub ribbon_collapsed: bool,
     pub view: ViewMode,
@@ -117,6 +159,8 @@ impl Default for UiState {
             ui_theme: theme::UiTheme::Standard,
             custom_theme: theme::CustomTheme::default(),
             keymap: keymap::Keymap::default(),
+            reduce_motion: false,
+            startup: Startup::StartScreen,
             tab: "Home".into(),
             ribbon_collapsed: false,
             view: ViewMode::Normal,
@@ -139,6 +183,12 @@ impl Default for UiState {
         }
     }
 }
+
+/// File › Settings › General › Interface size: smallest and largest.
+pub const MIN_UI_SCALE: f32 = 0.75;
+pub const MAX_UI_SCALE: f32 = 2.0;
+/// The largest settings backup `settings.import` reads.
+const MAX_SETTINGS_BYTES: usize = 1 << 20;
 
 /// UI-only commands (id, label, shortcut, params).
 pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
@@ -193,6 +243,18 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("keys.set", "Set Keyboard Shortcut", None, "{action, keys: [\"Cmd+Shift+K\"…], replace?: bool}"),
     ("keys.reset", "Reset Keyboard Shortcuts", None, "{action?}"),
     ("app.resetSettings", "Reset All Settings", None, "{}"),
+    ("view.interfaceSize", "Interface Size", None, "{scale: 0.75 to 2, 1 = 100%}"),
+    ("view.reduceMotion", "Reduce Motion", None, "{on?: bool}"),
+    ("app.startup", "When DeckCraft Starts", None, "{open: startScreen|lastFile|blank}"),
+    (
+        "settings.newPresentation",
+        "New Presentation Defaults",
+        None,
+        "{theme?: built-in name (empty: the default), size?: widescreen|standard, font?: name (empty: the theme's), forgetShape?: bool}",
+    ),
+    ("settings.export", "Back Up Settings", None, "{path?} → {settings} or {path}"),
+    ("settings.import", "Restore Settings", None, "{path? | settings?: what settings.export gave}"),
+    ("keys.cheatSheet", "Keyboard Shortcut Cheat Sheet", None, "{} → {text, html}"),
 ];
 
 pub struct Perf {
@@ -350,6 +412,168 @@ impl SlideApp {
         self.restyle = true;
         let c = self.ui.custom_theme;
         Ok(json!({"theme": self.ui.ui_theme.id(), "tint": theme::hex(c.tint), "accent": theme::hex(c.accent), "strength": c.strength}))
+    }
+
+    /// `settings.newPresentation`: File › Settings › New Presentations. Each setting given is
+    /// checked and stored in the engine's prefs, which `file.new` reads.
+    fn new_presentation_defaults(&mut self, p: &Value) -> Result<Value, String> {
+        let prefs = &mut self.session.prefs;
+        if let Some(name) = p.get("theme").and_then(Value::as_str).map(str::trim) {
+            prefs.new_theme = if name.is_empty() {
+                String::new()
+            } else {
+                let th = deckcraft_model::theme::builtin_themes().into_iter().find(|t| t.name.eq_ignore_ascii_case(name));
+                th.map(|t| t.name).ok_or_else(|| format!("no built-in theme is called `{name}`"))?
+            };
+        }
+        if let Some(size) = p.get("size").and_then(Value::as_str) {
+            prefs.new_size = match size.to_ascii_lowercase().as_str() {
+                "standard" => "standard".into(),
+                "widescreen" => String::new(),
+                _ => return Err(format!("`size` must be widescreen or standard, not `{size}`")),
+            };
+        }
+        if let Some(font) = p.get("font").and_then(Value::as_str).map(str::trim) {
+            if font.len() > 128 {
+                return Err("`font` is too long to be a font name".into());
+            }
+            prefs.new_font = font.to_string();
+        }
+        if p.get("forgetShape").and_then(Value::as_bool) == Some(true) {
+            prefs.default_shape = None;
+        }
+        Ok(json!({
+            "theme": prefs.new_theme,
+            "size": if prefs.new_size == "standard" { "standard" } else { "widescreen" },
+            "font": prefs.new_font,
+            "defaultShape": prefs.default_shape.is_some(),
+        }))
+    }
+
+    /// What a settings backup holds: the interface's settings and the engine's prefs. The recent
+    /// files stay out: they name documents on this computer.
+    fn settings_backup(&self) -> Result<Value, String> {
+        let mut ui = self.ui.clone();
+        ui.recent.clear();
+        let ui = serde_json::to_value(&ui).map_err(|e| e.to_string())?;
+        let prefs = serde_json::to_value(&self.session.prefs).map_err(|e| e.to_string())?;
+        Ok(json!({"deckcraft": "settings", "version": 1, "ui": ui, "prefs": prefs}))
+    }
+
+    /// `settings.export {path?}`: the backup, written to `path` when one is given.
+    fn export_settings(&mut self, p: &Value) -> Result<Value, String> {
+        let backup = self.settings_backup()?;
+        let Some(path) = p.get("path").and_then(Value::as_str) else { return Ok(json!({"settings": backup})) };
+        let bytes = serde_json::to_vec_pretty(&backup).map_err(|e| e.to_string())?;
+        let write = self.services.write.as_mut().ok_or("this window can't write files")?;
+        write(path, &bytes)?;
+        Ok(json!({"path": path}))
+    }
+
+    /// `settings.import {path | settings}`: every setting from a backup. The recent files stay as
+    /// they are. A file that isn't a backup changes nothing.
+    fn import_settings(&mut self, p: &Value) -> Result<Value, String> {
+        const NOT_A_BACKUP: &str = "that isn't a DeckCraft settings backup";
+        let backup: Value = match (p.get("settings"), p.get("path").and_then(Value::as_str)) {
+            (Some(v), _) => v.clone(),
+            (None, Some(path)) => {
+                let read = self.services.read.as_ref().ok_or("this window can't read files")?;
+                let bytes = read(path)?;
+                if bytes.len() > MAX_SETTINGS_BYTES {
+                    return Err(NOT_A_BACKUP.into());
+                }
+                serde_json::from_slice(&bytes).map_err(|_| NOT_A_BACKUP.to_string())?
+            }
+            (None, None) => return Err("give the backup's `path`, or its `settings`".into()),
+        };
+        if backup.get("deckcraft").and_then(Value::as_str) != Some("settings") {
+            return Err(NOT_A_BACKUP.into());
+        }
+        let part = |k: &str| backup.get(k).cloned().unwrap_or_else(|| json!({}));
+        let ui: UiState = serde_json::from_value(part("ui")).map_err(|e| format!("{NOT_A_BACKUP}: {e}"))?;
+        let prefs: deckcraft_engine::Prefs = serde_json::from_value(part("prefs")).map_err(|e| format!("{NOT_A_BACKUP}: {e}"))?;
+        let recent = std::mem::take(&mut self.ui.recent);
+        self.ui = UiState { recent, ..ui };
+        self.ui.keymap.sanitize();
+        self.session.prefs = prefs;
+        self.restyle = true;
+        Ok(json!({"restored": true}))
+    }
+
+    /// File › Settings › Backup and Reset › Back up settings…: a file the user picks (desktop) or
+    /// a download (web).
+    pub fn backup_settings(&mut self) {
+        const NAME: &str = "DeckCraft settings.json";
+        if let Some(pick) = self.services.pick_save.as_mut() {
+            let Some(path) = pick(NAME) else { return };
+            if self.run("settings.export", json!({"path": path})).is_ok() {
+                self.set_status(format!("Backed up your settings to {path}"));
+            }
+            return;
+        }
+        match self.settings_backup().and_then(|v| serde_json::to_vec_pretty(&v).map_err(|e| e.to_string())) {
+            Ok(bytes) => {
+                self.download(NAME, Ok(bytes));
+            }
+            Err(e) => self.set_status(e),
+        }
+    }
+
+    /// File › Settings › Backup and Reset › Restore from a backup…
+    pub fn restore_settings(&mut self) {
+        let Some(pick) = self.services.pick_open.as_mut() else {
+            self.set_status("Restoring settings needs a file picker, which this window doesn't have.");
+            return;
+        };
+        let Some(path) = pick("settings") else { return };
+        if self.run("settings.import", json!({"path": path})).is_ok() {
+            self.set_status("Restored your settings from the backup");
+        }
+    }
+
+    /// File › Settings › Keyboard Shortcuts › Save cheat sheet…: a page with every shortcut,
+    /// opened in the browser to print (desktop) or downloaded (web).
+    pub fn save_cheat_sheet(&mut self) {
+        const NAME: &str = "DeckCraft keyboard shortcuts.html";
+        let (_, html) = self.ui.keymap.cheat_sheet();
+        let Some(pick) = self.services.pick_save.as_mut() else {
+            self.download(NAME, Ok(html.into_bytes()));
+            return;
+        };
+        let Some(path) = pick(NAME) else { return };
+        let written = match self.services.write.as_mut() {
+            Some(write) => write(&path, html.as_bytes()),
+            None => Err("this window can't write files".into()),
+        };
+        match written {
+            Ok(()) => {
+                self.open_url(&format!("file:///{}", path.replace('\\', "/").trim_start_matches('/')));
+                self.set_status(format!("Saved the cheat sheet to {path}; print it from your browser"));
+            }
+            Err(e) => self.set_status(e),
+        }
+    }
+
+    /// File › Settings › General › When DeckCraft starts: called once the files given on the
+    /// command line are open. With nothing open, opens the last presentation or a blank one; the
+    /// start screen needs nothing.
+    pub fn startup(&mut self) {
+        if self.session.active().is_some() {
+            return;
+        }
+        match self.ui.startup {
+            Startup::StartScreen => {}
+            Startup::LastFile => {
+                if let Some(path) = self.ui.recent.first().cloned()
+                    && let Err(e) = self.open_path(&path)
+                {
+                    self.set_status(format!("Couldn't reopen {path}: {e}"));
+                }
+            }
+            Startup::Blank => {
+                let _ = self.run("file.new", json!({}));
+            }
+        }
     }
 
     /// Ctrl+C, Ctrl+X and Ctrl+V arrive as Copy, Cut and Paste events as well as key presses: when
@@ -568,6 +792,26 @@ impl SlideApp {
             "keys.list" => return Ok(self.ui.keymap.list()),
             "keys.set" => return self.ui.keymap.set(p),
             "keys.reset" => return self.ui.keymap.reset(p),
+            "keys.cheatSheet" => {
+                let (text, html) = self.ui.keymap.cheat_sheet();
+                return Ok(json!({"text": text, "html": html}));
+            }
+            "view.interfaceSize" => {
+                let scale = p.get("scale").and_then(Value::as_f64).filter(|s| s.is_finite()).ok_or("`scale` must be a number, 1 = 100%")?;
+                self.ui.ui_scale = (scale as f32).clamp(MIN_UI_SCALE, MAX_UI_SCALE);
+                return Ok(json!({"scale": self.ui.ui_scale}));
+            }
+            "view.reduceMotion" => {
+                self.ui.reduce_motion = self.flag(p, self.ui.reduce_motion);
+                self.restyle = true;
+            }
+            "app.startup" => {
+                let id = p.get("open").and_then(Value::as_str).unwrap_or("");
+                self.ui.startup = Startup::parse(id).ok_or_else(|| format!("`open` must be startScreen, lastFile or blank, not `{id}`"))?;
+            }
+            "settings.newPresentation" => return self.new_presentation_defaults(p),
+            "settings.export" => return self.export_settings(p),
+            "settings.import" => return self.import_settings(p),
             "app.resetSettings" => {
                 // Every setting back to how DeckCraft ships; the recent files are a list of the
                 // user's documents, not a setting, so they stay.
@@ -824,6 +1068,12 @@ impl SlideApp {
         }
         if self.restyle {
             theme::apply(ctx, &self.tokens());
+            // Reduce motion: no animated opening, hovering or scrolling in the interface.
+            let calm = self.ui.reduce_motion;
+            ctx.all_styles_mut(|s| {
+                s.animation_time = if calm { 0.0 } else { egui::Style::default().animation_time };
+                s.scroll_animation = if calm { egui::style::ScrollAnimation::none() } else { egui::style::ScrollAnimation::default() };
+            });
             self.restyle = false;
         }
         let now = ctx.input(|i| i.time);

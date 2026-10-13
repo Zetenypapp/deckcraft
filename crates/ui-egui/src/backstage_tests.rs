@@ -447,6 +447,9 @@ fn the_gear_opens_settings_and_theme_cards_apply() {
     h.get_by_label("Open Settings").click();
     h.run_steps(3);
     assert_eq!(page(&h), Some(Page::Settings));
+    assert_eq!(h.state().backstage.as_ref().map(|b| b.settings_tab), Some(SettingsTab::General));
+    h.get_by_label("Themes").click();
+    h.run_steps(3);
     assert_eq!(h.state().backstage.as_ref().map(|b| b.settings_tab), Some(SettingsTab::Themes));
 
     h.get_by_label("Lagoon").click();
@@ -643,4 +646,190 @@ fn reset_all_settings_asks_then_resets_but_keeps_recent_files() {
     assert!(app.ui.keymap.0.is_empty() && app.session.prefs.smart_quotes);
     assert_eq!(app.ui.recent, vec!["talk.pptx".to_string()]);
     assert!(!Tokens::get(&h.ctx).high_contrast, "the look is reset too");
+}
+
+// ---------- File › Settings: General, New Presentations, search, backup, cheat sheet ----------
+
+fn settings_tab(h: &Harness<'_, SlideApp>) -> Option<SettingsTab> {
+    h.state().backstage.as_ref().map(|b| b.settings_tab)
+}
+
+/// The search box finds a setting by its name or by other words, and jumps to its tab.
+#[test]
+fn settings_search_finds_settings_and_jumps_to_their_tab() {
+    let tabs = |q: &str| settings_search(q).into_iter().map(|h| h.0).collect::<Vec<_>>();
+    assert!(tabs("dark").contains(&SettingsTab::Themes));
+    assert_eq!(tabs("zoom"), vec![SettingsTab::General]);
+    assert_eq!(tabs("factory"), vec![SettingsTab::Backup]);
+    assert_eq!(tabs("PRINT cheat"), vec![SettingsTab::Shortcuts], "every word, any case");
+    assert!(settings_search("").is_empty() && settings_search("zzz").is_empty());
+
+    let mut h = harness(new_app());
+    h.state_mut().run("app.backstage", json!({"page": "settings"})).unwrap();
+    h.run_steps(3);
+    h.get_by_label("Search settings").click();
+    h.run_steps(2);
+    h.get_by_label("Search settings").type_text("4:3");
+    h.run_steps(3);
+    assert_eq!(settings_tab(&h), Some(SettingsTab::NewPresentations));
+    assert_eq!(h.query_all_by_label("Slide size").count(), 2, "listed under its tab, and shown on it");
+}
+
+/// General: interface size (presets, steps, limits), reduce motion and what opens at start.
+#[test]
+fn the_general_tab_sets_size_motion_and_startup() {
+    let mut h = harness(new_app());
+    h.state_mut().run("app.backstage", json!({"page": "settings", "tab": "general"})).unwrap();
+    h.run_steps(3);
+    h.get_by_label("125%").click();
+    h.run_steps(3);
+    assert_eq!(h.state().ui.ui_scale, 1.25);
+    h.get_by_label("+").click();
+    h.run_steps(3);
+    assert!((h.state().ui.ui_scale - 1.3).abs() < 1e-4);
+    assert_eq!(h.state_mut().run("view.interfaceSize", json!({"scale": 50})).unwrap()["scale"], 2.0);
+    assert!(h.state_mut().run("view.interfaceSize", json!({"scale": "big"})).is_err());
+    h.state_mut().run("view.interfaceSize", json!({"scale": 1})).unwrap();
+    h.run_steps(3);
+
+    h.get_by_label("Reduce motion").click();
+    h.run_steps(3);
+    assert!(h.state().ui.reduce_motion);
+    assert_eq!(h.ctx.global_style().animation_time, 0.0, "the interface stops animating");
+
+    h.get_by_label("A new blank presentation").click();
+    h.run_steps(3);
+    assert_eq!(h.state().ui.startup, crate::Startup::Blank);
+    assert!(h.state_mut().run("app.startup", json!({"open": "sometimes"})).is_err());
+}
+
+/// What opens at start, when nothing else did.
+#[test]
+fn startup_opens_what_the_setting_says() {
+    let fresh = |startup: crate::Startup, recent: Vec<String>| {
+        let mut app = SlideApp::new(Session::new(), Services::default());
+        app.ui.startup = startup;
+        app.ui.recent = recent;
+        app.startup();
+        app
+    };
+    assert!(fresh(crate::Startup::StartScreen, vec![]).session.active().is_none());
+    assert!(fresh(crate::Startup::Blank, vec![]).session.active().is_some());
+    // The last file is gone: no crash, the start screen and a note.
+    let app = fresh(crate::Startup::LastFile, vec!["/no/such/talk.pptx".into()]);
+    assert!(app.session.active().is_none());
+    assert!(app.status.as_ref().is_some_and(|s| s.0.contains("talk.pptx")));
+
+    let dir = temp_dir("startup");
+    let path = dir.join("talk.deckcraft").to_string_lossy().to_string();
+    let mut maker = new_app();
+    maker.session.execute("file.saveAs", &json!({"path": path})).unwrap();
+    let app = fresh(crate::Startup::LastFile, vec![path.clone()]);
+    assert_eq!(app.session.active().and_then(|d| d.path.clone()), Some(path));
+    // Something already open (a file given on the command line) wins.
+    let mut app = new_app();
+    app.ui.startup = crate::Startup::Blank;
+    app.startup();
+    assert_eq!(app.session.documents().len(), 1);
+}
+
+/// New Presentations: theme, slide size and font for every new presentation.
+#[test]
+fn the_new_presentations_tab_sets_what_new_presentations_start_with() {
+    let last = deckcraft_model::theme::builtin_themes().last().map(|t| t.name.clone()).unwrap();
+    let mut h = harness(new_app());
+    h.state_mut().run("app.backstage", json!({"page": "settings", "tab": "new"})).unwrap();
+    h.run_steps(3);
+    h.get_by_label("Standard (4:3)").click();
+    h.run_steps(3);
+    let app = h.state_mut();
+    assert_eq!(app.session.prefs.new_size, "standard");
+    app.run("settings.newPresentation", json!({"theme": last.to_uppercase(), "font": "Georgia"})).unwrap();
+    assert_eq!(app.session.prefs.new_theme, last, "stored under its own name");
+    assert!(app.run("settings.newPresentation", json!({"theme": "Not A Theme"})).is_err());
+    assert!(app.run("settings.newPresentation", json!({"size": "huge"})).is_err());
+    app.run("file.new", json!({})).unwrap();
+    let doc = &app.session.active().unwrap().doc;
+    assert_eq!(doc.slide_size, deckcraft_model::defaults::STANDARD);
+    assert_eq!((doc.masters[0].theme.name.as_str(), doc.masters[0].theme.fonts.minor.latin.as_str()), (last.as_str(), "Georgia"));
+    let v = app.run("settings.newPresentation", json!({"theme": "", "size": "widescreen", "font": ""})).unwrap();
+    assert_eq!(v, json!({"theme": "", "size": "widescreen", "font": "", "defaultShape": false}));
+}
+
+/// Backup and Reset: a backup file brings every setting back, but not the recent files; a file
+/// that isn't a backup changes nothing.
+#[test]
+fn settings_back_up_to_a_file_and_restore_from_it() {
+    let dir = temp_dir("settings-backup");
+    let file = dir.join("DeckCraft settings.json");
+    let services = |dir: std::path::PathBuf| Services {
+        pick_save: Some(Box::new(move |name: &str| Some(dir.join(name).to_string_lossy().to_string()))),
+        pick_open: Some(Box::new({
+            let f = file.to_string_lossy().to_string();
+            move |_: &str| Some(f.clone())
+        })),
+        read: Some(Box::new(|p: &str| std::fs::read(p).map_err(|e| e.to_string()))),
+        write: Some(Box::new(|p: &str, b: &[u8]| std::fs::write(p, b).map_err(|e| e.to_string()))),
+        ..Default::default()
+    };
+    let mut app = SlideApp::new(Session::with_new(), services(dir.clone()));
+    app.ui.recent = vec!["mine.pptx".into()];
+    app.run("view.uiTheme", json!({"theme": "lagoon"})).unwrap();
+    app.run("keys.set", json!({"action": "view.gridlines", "keys": ["Cmd+Alt+Shift+J"]})).unwrap();
+    app.run("view.reduceMotion", json!({"on": true})).unwrap();
+    app.session.prefs.smart_quotes = false;
+    let mut h = harness(app);
+    h.state_mut().run("app.backstage", json!({"page": "settings", "tab": "backup"})).unwrap();
+    h.run_steps(3);
+    h.get_by_label("Back up settings…").click();
+    h.run_steps(3);
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("lagoon") && !text.contains("mine.pptx"), "the recent files stay out of the backup");
+
+    let mut other = SlideApp::new(Session::with_new(), services(dir.clone()));
+    other.ui.recent = vec!["theirs.pptx".into()];
+    let mut h = harness(other);
+    h.state_mut().run("app.backstage", json!({"page": "settings", "tab": "backup"})).unwrap();
+    h.run_steps(3);
+    h.get_by_label("Restore from a backup…").click();
+    h.run_steps(3);
+    let app = h.state_mut();
+    assert_eq!(app.ui.ui_theme, theme::UiTheme::Lagoon);
+    assert!(app.ui.reduce_motion && !app.session.prefs.smart_quotes);
+    assert_eq!(app.ui.keymap.0.get("view.gridlines"), Some(&vec!["Cmd+Alt+Shift+J".to_string()]));
+    assert_eq!(app.ui.recent, vec!["theirs.pptx".to_string()]);
+
+    // Not a backup: refused, nothing changes.
+    for bad in [json!({"deckcraft": "presentation"}), json!({"deckcraft": "settings", "ui": 5}), json!([1, 2])] {
+        assert!(app.run("settings.import", json!({"settings": bad})).is_err());
+    }
+    std::fs::write(&file, b"\x00\x01 not json").unwrap();
+    assert!(app.run("settings.import", json!({"path": file.to_string_lossy()})).is_err());
+    assert_eq!(app.ui.ui_theme, theme::UiTheme::Lagoon);
+}
+
+/// Keyboard Shortcuts › Save cheat sheet…: a printable page of every key, the custom ones too.
+#[test]
+fn the_cheat_sheet_lists_every_shortcut() {
+    let dir = temp_dir("cheat-sheet");
+    let target = dir.clone();
+    let services = Services {
+        pick_save: Some(Box::new(move |name: &str| Some(target.join(name).to_string_lossy().to_string()))),
+        write: Some(Box::new(|p: &str, b: &[u8]| std::fs::write(p, b).map_err(|e| e.to_string()))),
+        ..Default::default()
+    };
+    let mut app = SlideApp::new(Session::with_new(), services);
+    app.run("keys.set", json!({"action": "view.gridlines", "keys": ["Cmd+Alt+Shift+J"]})).unwrap();
+    let v = app.run("keys.cheatSheet", json!({})).unwrap();
+    let text = v["text"].as_str().unwrap();
+    assert!(text.contains("Gridlines") && text.contains("Ctrl+Alt+Shift+J"), "{text}");
+    assert!(text.contains("Slide Show"));
+    let mut h = harness(app);
+    h.state_mut().run("app.backstage", json!({"page": "settings", "tab": "shortcuts"})).unwrap();
+    h.run_steps(3);
+    h.get_by_label("Save cheat sheet…").click();
+    h.run_steps(3);
+    let html = std::fs::read_to_string(dir.join("DeckCraft keyboard shortcuts.html")).unwrap();
+    assert!(html.starts_with("<!doctype html>") && html.contains("<kbd>"));
+    assert!(h.state().status.as_ref().is_some_and(|s| s.0.contains("cheat sheet")), "{:?}", h.state().status);
 }

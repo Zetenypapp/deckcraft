@@ -128,6 +128,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | What landed |
 |---|---|
+| 2026-10-13 | File › Settings grows: General (interface size, reduce motion, what opens at start), New Presentations (theme, slide size and font for every new presentation; Set as Default Shape now kept between sessions), a search box over the tabs, Backup and Reset (settings to and from a file), and a printable keyboard-shortcut cheat sheet |
 | 2026-10-13 | File › Settings, one page with tabs: Themes, Keyboard Shortcuts and Reset (the title bar's gear opens it). Custom keyboard shortcuts (#127): any command or slide-show action gets your own keys, recorded from a key press, with a warning before a key moves from another action; Reset all settings |
 | 2026-10-13 | Interface themes on File › Account (Office Theme's place): High Contrast, Lagoon, Sunset and Custom in light and dark, with previews and contrast checks; a gear in the title bar opens it |
 | 2026-10-13 | Slide transitions like PowerPoint: every transition and option measured frame by frame against PowerPoint's video export and retuned (curves, directions, soft edges, 3-D perspective, contents moving over backgrounds); PowerPoint's own XML elements and defaults read and written (diagonal Wipe, Zoom, Shape In/Out, Glitter Hexagons, Shred In/Out, Page Curl Single); `deckcraft-cli render-transition` renders frames headless |

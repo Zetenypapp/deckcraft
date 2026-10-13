@@ -458,6 +458,49 @@ impl Keymap {
         }
         Ok(json!({"custom": self.0.len()}))
     }
+
+    /// `keys.cheatSheet`: every action that has a key, the editor's then the slide show's, as
+    /// plain text and as a page to print.
+    pub fn cheat_sheet(&self) -> (String, String) {
+        const TITLE: &str = "DeckCraft keyboard shortcuts";
+        let mut text = format!("{TITLE}\n");
+        let mut html = format!(
+            "<!doctype html><html><head><meta charset=\"utf-8\"><title>{TITLE}</title><style>\
+             body{{font-family:system-ui,sans-serif;margin:32px;color:#222}}h1{{font-size:22px}}\
+             h2{{font-size:16px;margin:24px 0 6px}}table{{border-collapse:collapse;width:100%;max-width:780px}}\
+             td{{padding:4px 8px;border-bottom:1px solid #ddd;font-size:13px}}td.g{{color:#777}}td.k{{white-space:nowrap;text-align:right}}\
+             kbd{{border:1px solid #bbb;border-radius:3px;padding:1px 5px;font-family:inherit;background:#f6f6f6}}\
+             @media print{{body{{margin:12mm}}}}</style></head><body><h1>{TITLE}</h1>"
+        );
+        let mut all = actions();
+        all.sort_by(|a, b| a.group.cmp(&b.group).then(a.label.cmp(&b.label)));
+        for (scope, title) in [(Scope::Editor, "Editor"), (Scope::Show, "Slide Show")] {
+            text.push_str(&format!("\n{title}\n"));
+            html.push_str(&format!("<h2>{title}</h2><table>"));
+            for a in all.iter().filter(|a| a.scope == scope) {
+                let keys: Vec<String> = self.keys_of(a).iter().map(Combo::display).collect();
+                if keys.is_empty() {
+                    continue;
+                }
+                text.push_str(&format!("  {} ({}): {}\n", a.label, a.group, keys.join(", ")));
+                let kbd: Vec<String> = keys.iter().map(|k| format!("<kbd>{}</kbd>", escape(k))).collect();
+                html.push_str(&format!(
+                    "<tr><td>{}</td><td class=\"g\">{}</td><td class=\"k\">{}</td></tr>",
+                    escape(&a.label),
+                    escape(&a.group),
+                    kbd.join(" ")
+                ));
+            }
+            html.push_str("</table>");
+        }
+        html.push_str("</body></html>\n");
+        (text, html)
+    }
+}
+
+/// Text made safe to put in an HTML page.
+fn escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
 #[cfg(test)]

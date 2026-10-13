@@ -8,7 +8,7 @@ use crate::{DocState, EngineError, Result, Session};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        cmd!(noundo "file.new", "New Presentation", ["File"], Some("Cmd+N"), "{theme?: name, size?: [w,h] pt, blank?: bool}", always, new),
+        cmd!(noundo "file.new", "New Presentation", ["File"], Some("Cmd+N"), "{theme?: name, size?: [w,h] pt, blank?: bool} (missing ones: Settings › New Presentations)", always, new),
         cmd!(noundo "file.open", "Open…", ["File"], Some("Cmd+O"), "{path}", always, open),
         cmd!(noundo "file.openBytes", "Open Data", [], None, "{name, data: base64}", always, open_bytes),
         cmd!(noundo "file.save", "Save", ["File"], Some("Cmd+S"), "{path?, format?: deckcraft|pptx}", has_doc, save),
@@ -50,13 +50,21 @@ fn theme_named(name: &str) -> Option<deckcraft_model::Theme> {
 }
 
 fn new(s: &mut Session, p: &Value) -> Result<Value> {
-    let theme = str_param(p, "theme").and_then(theme_named).unwrap_or_default();
+    // What isn't given comes from Settings › New Presentations.
+    let prefs = &s.prefs;
+    let mut theme = str_param(p, "theme").or(Some(prefs.new_theme.as_str())).and_then(theme_named).unwrap_or_default();
+    let font = prefs.new_font.trim();
+    if !font.is_empty() && font.len() <= 128 {
+        theme.fonts.major.latin = font.to_string();
+        theme.fonts.minor.latin = font.to_string();
+    }
+    let default_size = if prefs.new_size.eq_ignore_ascii_case("standard") { defaults::STANDARD } else { defaults::WIDE };
     let size = p
         .get("size")
         .and_then(Value::as_array)
         .and_then(|a| Some(deckcraft_geom::Size::new(a.first()?.as_f64()?, a.get(1)?.as_f64()?)))
         .filter(|s| s.width >= 1.0 && s.height >= 1.0 && s.width < 5000.0 && s.height < 5000.0)
-        .unwrap_or(defaults::WIDE);
+        .unwrap_or(default_size);
     let doc = defaults::blank_presentation(size, theme, !bool_or(p, "blank", false));
     let title = s.next_untitled();
     let i = s.add_document(DocState::new(doc, None, title));

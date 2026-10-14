@@ -179,6 +179,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | What landed |
 |---|---|
+| 2026-10-14 | File › Settings › AI (#732): bring your own model. Any OpenAI-compatible server (Ollama, LM Studio, LocalAI, vLLM, OpenAI…) with your own address, model and key, a Test connection button, and Draft slides: describe a talk and the model's outline becomes slides after the current one, in one undoable step. Desktop only; the key is kept apart from settings backups |
 | 2026-10-13 | File › Settings grows: General (interface size, reduce motion, what opens at start), New Presentations (theme, slide size and font for every new presentation; Set as Default Shape now kept between sessions), a search box over the tabs, Backup and Reset (settings to and from a file), and a printable keyboard-shortcut cheat sheet |
 | 2026-10-13 | File › Settings, one page with tabs: Themes, Keyboard Shortcuts and Reset (the title bar's gear opens it). Custom keyboard shortcuts (#127): any command or slide-show action gets your own keys, recorded from a key press, with a warning before a key moves from another action; Reset all settings |
 | 2026-10-13 | Interface themes on File › Account (Office Theme's place): High Contrast, Lagoon, Sunset and Custom in light and dark, with previews and contrast checks; a gear in the title bar opens it |

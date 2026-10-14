@@ -6,6 +6,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod ai;
 pub mod animtimeline;
 pub mod backstage;
 pub mod canvas;
@@ -55,6 +56,8 @@ pub type PickFn = Box<dyn FnMut(&str) -> Option<String>>;
 /// not applied to whichever document happens to be active.
 pub type OpenAsyncFn = Box<dyn FnMut(&str, u64)>;
 pub type DownloadFn = Box<dyn FnMut(&str, &[u8])>;
+/// Send an AI request (File › Settings › AI) in the background; the reply arrives on the receiver.
+pub type AiSendFn = Box<dyn FnMut(ai::AiCall) -> std::sync::mpsc::Receiver<Result<Value, String>>>;
 
 /// A file the host finished reading for the request `id` from [`SlideApp::begin_external_file`].
 #[derive(Clone, Debug)]
@@ -220,6 +223,8 @@ pub struct Services {
     pub clipboard_set_html: Option<Box<dyn FnMut(&str, &str) -> bool>>,
     /// Audio output for media playback (cpal on desktop); without one media plays silently.
     pub audio_out: Option<Box<dyn deckcraft_media::AudioOut>>,
+    /// Sends AI requests (desktop); without it the AI tab explains that this window can't.
+    pub ai_send: Option<AiSendFn>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -285,6 +290,8 @@ pub struct UiState {
     pub reduce_motion: bool,
     /// File › Settings › General: what DeckCraft shows when it starts with nothing to open.
     pub startup: Startup,
+    /// File › Settings › AI: the server and model (the key is kept apart, in `SlideApp::ai_key`).
+    pub ai: ai::AiSettings,
     pub tab: String,
     pub ribbon_collapsed: bool,
     pub view: ViewMode,
@@ -332,6 +339,7 @@ impl Default for UiState {
             keymap: keymap::Keymap::default(),
             reduce_motion: false,
             startup: Startup::StartScreen,
+            ai: ai::AiSettings::default(),
             tab: "Home".into(),
             ribbon_collapsed: false,
             view: ViewMode::Normal,
@@ -451,7 +459,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
         "app.backstage",
         "File",
         Some("Alt+F"),
-        "{page?: home|new|open|info|saveAs|print|export|account|settings, tab?: themes|shortcuts|reset, on?: bool}",
+        "{page?: home|new|open|info|saveAs|print|export|account|settings, tab?: general|themes|new|shortcuts|ai|backup, on?: bool}",
     ),
     ("app.closePresentation", "Close", Some("Cmd+W"), "{}"),
     (
@@ -495,6 +503,9 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("settings.export", "Back Up Settings", None, "{path?} → {settings} or {path}"),
     ("settings.import", "Restore Settings", None, "{path? | settings?: what settings.export gave}"),
     ("keys.cheatSheet", "Keyboard Shortcut Cheat Sheet", None, "{} → {text, html}"),
+    ("settings.ai", "AI Settings", None, "{endpoint?: http(s) address up to /v1, model?, key?: \"\" forgets it} → {endpoint, model, hasKey}"),
+    ("ai.test", "Test AI Connection", None, "{} (the answer arrives later, in File › Settings › AI)"),
+    ("ai.draftSlides", "Draft Slides with AI", None, "{prompt} (the slides arrive later, after the current slide)"),
 ];
 
 pub struct Perf {
@@ -594,6 +605,11 @@ pub struct SlideApp {
     next_file_id: u64,
     /// Picks and drops whose bytes have not arrived yet.
     pending_files: Vec<PendingFile>,
+    /// File › Settings › AI: the API key. Not part of `UiState`, so it stays out of ui.json and
+    /// settings backups; the desktop app keeps it in a file of its own.
+    pub ai_key: String,
+    /// AI requests in flight and their outcome.
+    pub ai: ai::State,
 }
 
 fn grid_options_touched(p: &Value) -> bool {
@@ -660,6 +676,8 @@ impl SlideApp {
             twisting: false,
             next_file_id: 1,
             pending_files: Vec::new(),
+            ai_key: String::new(),
+            ai: ai::State::default(),
         }
     }
 
@@ -869,6 +887,84 @@ impl SlideApp {
         self.session.prefs = prefs;
         self.restyle = true;
         Ok(json!({"restored": true}))
+    }
+
+    /// `settings.ai`: File › Settings › AI. Each field given is checked and stored; the key is
+    /// never handed back, only whether there is one.
+    fn ai_settings(&mut self, p: &Value) -> Result<Value, String> {
+        let text = |k: &str| -> Result<Option<String>, String> {
+            match p.get(k) {
+                None | Some(Value::Null) => Ok(None),
+                Some(v) => v.as_str().ok_or_else(|| format!("`{k}` must be text")).and_then(|v| ai::field(k, v)).map(Some),
+            }
+        };
+        let (endpoint, model, key) = (text("endpoint")?, text("model")?, text("key")?);
+        if let Some(e) = &endpoint {
+            ai::chat_url(e)?;
+        }
+        if let Some(e) = endpoint {
+            self.ui.ai.endpoint = e;
+        }
+        if let Some(m) = model {
+            self.ui.ai.model = m;
+        }
+        if let Some(k) = key {
+            self.ai_key = k;
+        }
+        Ok(json!({"endpoint": self.ui.ai.endpoint, "model": self.ui.ai.model, "hasKey": !self.ai_key.is_empty()}))
+    }
+
+    /// Hand an AI request to the host; one at a time.
+    fn ai_send(&mut self, job: ai::Job, call: ai::AiCall) -> Result<Value, String> {
+        if self.ai.pending.is_some() {
+            return Err("DeckCraft is still waiting for the AI's last answer.".into());
+        }
+        let send = self.services.ai_send.as_mut().ok_or("AI needs the DeckCraft desktop app: this window can't reach an AI server.")?;
+        self.ai.pending = Some((job, send(call)));
+        self.ai.outcome = None;
+        Ok(json!({"waiting": true}))
+    }
+
+    /// Collect an AI reply that has arrived: a test's verdict, or a draft's slides.
+    fn poll_ai(&mut self, ctx: &egui::Context) {
+        let Some((job, rx)) = &self.ai.pending else { return };
+        let reply = match rx.try_recv() {
+            Ok(r) => r,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                return;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("The AI request stopped without an answer.".into()),
+        };
+        let job = job.clone();
+        self.ai.pending = None;
+        let text = reply.and_then(|v| ai::reply_text(&v));
+        let outcome = match (job, text) {
+            (_, Err(e)) => Err(e),
+            (ai::Job::Test, Ok(_)) => Ok(format!("Connected: {} answered.", self.ui.ai.model)),
+            (ai::Job::Draft, Ok(t)) => {
+                let outline = ai::outline(&t);
+                if !outline.lines().any(|l| l.trim_start().starts_with('#')) {
+                    Err("The AI didn't answer with an outline. Try again, or try another model.".into())
+                } else if self.session.active().is_none() {
+                    Err("The presentation was closed before the slides arrived.".into())
+                } else {
+                    match self.run("slide.fromOutline", json!({"text": outline, "markdown": true})) {
+                        Ok(v) => {
+                            let n = v.get("slides").and_then(Value::as_u64).unwrap_or(0);
+                            Ok(format!("Added {n} slide{} after the current one. Undo takes them away.", if n == 1 { "" } else { "s" }))
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+            }
+        };
+        match &outcome {
+            Ok(m) => self.set_status(m.clone()),
+            Err(e) => self.set_status(e.clone()),
+        }
+        self.ai.outcome = Some(outcome);
+        ctx.request_repaint();
     }
 
     /// File › Settings › Backup and Reset › Back up settings…: a file the user picks (desktop) or
@@ -1257,6 +1353,19 @@ impl SlideApp {
             "settings.newPresentation" => return self.new_presentation_defaults(p),
             "settings.export" => return self.export_settings(p),
             "settings.import" => return self.import_settings(p),
+            "settings.ai" => return self.ai_settings(p),
+            "ai.test" => {
+                let call = ai::test_call(&self.ui.ai, &self.ai_key)?;
+                return self.ai_send(ai::Job::Test, call);
+            }
+            "ai.draftSlides" => {
+                if self.session.active().is_none() {
+                    return Err("Open or create a presentation for the slides first.".into());
+                }
+                let prompt = p.get("prompt").and_then(Value::as_str).unwrap_or("");
+                let call = ai::draft_call(&self.ui.ai, &self.ai_key, prompt)?;
+                return self.ai_send(ai::Job::Draft, call);
+            }
             "app.resetSettings" => {
                 // Every setting back to how DeckCraft ships; the recent files are a list of the
                 // user's documents, not a setting, so they stay.
@@ -1847,6 +1956,7 @@ impl SlideApp {
             });
             self.restyle = false;
         }
+        self.poll_ai(ctx);
         let now = ctx.input(|i| i.time);
         let dt = now - self.last_time;
         if dt > 0.0 {

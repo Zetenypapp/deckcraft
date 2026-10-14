@@ -13,6 +13,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod ai_http;
 mod audio;
 mod control_server;
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -79,6 +80,9 @@ fn load_prefs(app: &mut SlideApp) {
     if let Some(prefs) = prefs {
         app.session.prefs = prefs;
     }
+    if let Some(dir) = config_dir() {
+        app.ai_key = ai_http::load_key(&dir);
+    }
 }
 
 fn save_prefs(app: &SlideApp) {
@@ -87,6 +91,9 @@ fn save_prefs(app: &SlideApp) {
     }
     if let Some(dir) = config_dir() {
         deckcraft_ui_egui::settings::save(&dir, &app.ui, &app.session.prefs);
+    }
+    if let Some(dir) = config_dir() {
+        ai_http::save_key(&dir, &app.ai_key);
     }
 }
 
@@ -121,6 +128,7 @@ fn services() -> Services {
         audio_out: std::env::var_os("DECKCRAFT_NO_AUDIO")
             .is_none()
             .then(|| Box::new(audio::CpalOut::default()) as Box<dyn deckcraft_media::AudioOut>),
+        ai_send: Some(Box::new(ai_http::send)),
         ..Default::default()
     }
 }

@@ -107,12 +107,13 @@ pub enum SettingsTab {
     Themes,
     NewPresentations,
     Shortcuts,
+    Ai,
     Backup,
 }
 
 impl SettingsTab {
-    pub const ALL: [SettingsTab; 5] =
-        [SettingsTab::General, SettingsTab::Themes, SettingsTab::NewPresentations, SettingsTab::Shortcuts, SettingsTab::Backup];
+    pub const ALL: [SettingsTab; 6] =
+        [SettingsTab::General, SettingsTab::Themes, SettingsTab::NewPresentations, SettingsTab::Shortcuts, SettingsTab::Ai, SettingsTab::Backup];
 
     /// The id `app.backstage {page: "settings", tab}` takes.
     pub fn id(self) -> &'static str {
@@ -121,6 +122,7 @@ impl SettingsTab {
             SettingsTab::Themes => "themes",
             SettingsTab::NewPresentations => "new",
             SettingsTab::Shortcuts => "shortcuts",
+            SettingsTab::Ai => "ai",
             SettingsTab::Backup => "backup",
         }
     }
@@ -138,6 +140,7 @@ impl SettingsTab {
             SettingsTab::Themes => "Themes",
             SettingsTab::NewPresentations => "New Presentations",
             SettingsTab::Shortcuts => "Keyboard Shortcuts",
+            SettingsTab::Ai => "AI",
             SettingsTab::Backup => "Backup and Reset",
         }
     }
@@ -148,6 +151,7 @@ impl SettingsTab {
             SettingsTab::Themes => Icon::Palette,
             SettingsTab::NewPresentations => Icon::NewFile,
             SettingsTab::Shortcuts => Icon::Keyboard,
+            SettingsTab::Ai => Icon::Sparkle,
             SettingsTab::Backup => Icon::Save,
         }
     }
@@ -166,6 +170,8 @@ const SETTINGS_INDEX: &[(SettingsTab, &str, &str)] = &[
     (SettingsTab::NewPresentations, "Default shape", "set as default shape look style"),
     (SettingsTab::Shortcuts, "Keyboard shortcuts", "keys hotkeys keybindings customise customize"),
     (SettingsTab::Shortcuts, "Shortcut cheat sheet", "print save copy list"),
+    (SettingsTab::Ai, "AI server and model", "artificial intelligence llm ollama lm studio openai api key endpoint address byok local"),
+    (SettingsTab::Ai, "Draft slides with AI", "artificial intelligence generate write outline prompt copilot"),
     (SettingsTab::Backup, "Back up settings", "export save file another computer"),
     (SettingsTab::Backup, "Restore settings", "import load file another computer"),
     (SettingsTab::Backup, "Reset all settings", "factory defaults"),
@@ -1582,6 +1588,7 @@ fn settings(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
                     }
                     SettingsTab::NewPresentations => new_presentation_settings(app, ui, &t),
                     SettingsTab::Shortcuts => shortcuts(app, ui, bs),
+                    SettingsTab::Ai => ai_settings(app, ui, &t),
                     SettingsTab::Backup => backup_and_reset(app, ui, bs),
                 }
             })
@@ -1738,6 +1745,119 @@ fn new_presentation_settings(app: &mut SlideApp, ui: &mut Ui, t: &Tokens) {
     ui.add_space(18.0);
     if ui.button("New presentation with these settings").clicked() {
         let _ = app.run("file.new", json!({}));
+    }
+}
+
+/// Settings › AI (#732): the user's own AI server, model and key, and Draft slides from a prompt.
+fn ai_settings(app: &mut SlideApp, ui: &mut Ui, t: &Tokens) {
+    use crate::ai::{Job, PRESETS};
+    ui.set_max_width(640.0);
+    dim(
+        ui,
+        "Use an AI model you choose: one running on this computer, like Ollama or LM Studio, or a service you have a key for. DeckCraft sends only what you type below, and only when you ask.",
+    );
+    if app.services.ai_send.is_none() {
+        ui.add_space(6.0);
+        ui.label(RichText::new("AI needs the DeckCraft desktop app: this window can't reach an AI server.").color(ui.visuals().warn_fg_color));
+    }
+    let waiting = app.ai.pending.as_ref().map(|(job, _)| job.clone());
+
+    sub(ui, "Server", t);
+    ui.horizontal(|ui| {
+        for (name, endpoint, model) in PRESETS {
+            let on = app.ui.ai.endpoint.trim_end_matches('/') == endpoint;
+            if ui.add(egui::Button::selectable(on, name).min_size(vec2(0.0, 26.0))).clicked() {
+                let model = if model.is_empty() { app.ui.ai.model.clone() } else { model.to_string() };
+                let _ = app.run("settings.ai", json!({"endpoint": endpoint, "model": model}));
+            }
+        }
+    });
+    ui.add_space(6.0);
+    egui::Grid::new("ai_settings").num_columns(2).spacing(vec2(14.0, 10.0)).show(ui, |ui| {
+        ui.label("Address");
+        // Kept as typed (it is checked when a request goes out), so half an address isn't an error.
+        let mut endpoint = app.ui.ai.endpoint.clone();
+        let field = ui.add(egui::TextEdit::singleline(&mut endpoint).hint_text("http://localhost:11434/v1").desired_width(380.0));
+        field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "AI server address"));
+        if field.changed() && endpoint.len() <= 2048 {
+            app.ui.ai.endpoint = endpoint;
+        }
+        ui.end_row();
+        ui.label("Model");
+        let mut model = app.ui.ai.model.clone();
+        let field = ui.add(egui::TextEdit::singleline(&mut model).hint_text("llama3.2").desired_width(380.0));
+        field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "AI model"));
+        if field.changed() {
+            let _ = app.run("settings.ai", json!({"model": model}));
+        }
+        ui.end_row();
+        ui.label("API key");
+        ui.horizontal(|ui| {
+            let mut key = app.ai_key.clone();
+            let field = ui.add(egui::TextEdit::singleline(&mut key).password(true).hint_text("Not needed on this computer").desired_width(280.0));
+            field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "AI API key"));
+            if field.changed() {
+                let _ = app.run("settings.ai", json!({"key": key}));
+            }
+            if !app.ai_key.is_empty() && ui.button("Forget key").clicked() {
+                let _ = app.run("settings.ai", json!({"key": ""}));
+            }
+        });
+        ui.end_row();
+    });
+    dim(ui, "The key stays on this computer, apart from your other settings: a settings backup doesn't include it.");
+    if crate::ai::chat_url(&app.ui.ai.endpoint).is_err() {
+        ui.label(RichText::new("The address must start with http:// or https://.").color(ui.visuals().error_fg_color));
+    } else if crate::ai::key_in_the_clear(&app.ui.ai.endpoint, &app.ai_key) {
+        ui.label(
+            RichText::new("This address starts with http://, so your key would travel unencrypted. Use https:// for a server on another computer.")
+                .color(ui.visuals().warn_fg_color),
+        );
+    }
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        let can = waiting.is_none() && app.services.ai_send.is_some();
+        if ui.add_enabled(can, egui::Button::new("Test connection")).clicked() {
+            let _ = app.run("ai.test", json!({}));
+        }
+        if waiting == Some(Job::Test) {
+            ui.spinner();
+            dim(ui, "Asking the server…");
+        }
+    });
+
+    sub(ui, "Draft slides", t);
+    dim(ui, "Describe a talk and the AI writes an outline; DeckCraft makes it into slides after the current one. Undo takes them away again.");
+    ui.add_space(6.0);
+    let field = egui::TextEdit::multiline(&mut app.ai.prompt)
+        .hint_text("Five slides introducing the solar system to a school class")
+        .desired_rows(3)
+        .desired_width(560.0)
+        .char_limit(crate::ai::MAX_PROMPT);
+    let field = ui.add(field);
+    field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "What the slides are about"));
+    ui.add_space(6.0);
+    let has_doc = app.session.active().is_some();
+    ui.horizontal(|ui| {
+        let can = waiting.is_none() && has_doc && app.services.ai_send.is_some() && !app.ai.prompt.trim().is_empty();
+        if ui.add_enabled(can, egui::Button::new("Draft slides")).clicked() {
+            let prompt = app.ai.prompt.clone();
+            let _ = app.run("ai.draftSlides", json!({"prompt": prompt}));
+        }
+        if waiting == Some(Job::Draft) {
+            ui.spinner();
+            dim(ui, "Writing your slides… a model on this computer can take a minute.");
+        } else if !has_doc {
+            dim(ui, "Open or create a presentation first.");
+        }
+    });
+    if let Some(outcome) = &app.ai.outcome {
+        ui.add_space(8.0);
+        let (text, colour) = match outcome {
+            Ok(m) => (m.as_str(), t.text),
+            Err(e) => (e.as_str(), ui.visuals().error_fg_color),
+        };
+        ui.label(RichText::new(text).color(colour));
     }
 }
 

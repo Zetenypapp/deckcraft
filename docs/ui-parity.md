@@ -1,5 +1,6 @@
 # UI parity with PowerPoint
 
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (File › Settings › AI: your own AI server and Draft slides, #732; previous: File › Settings tabs) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (File › Settings: General, New Presentations, search, backup, cheat sheet; custom keyboard shortcuts and Reset all settings; File › Settings with Themes, Keyboard Shortcuts and Reset tabs; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** trivial (Eyedropper in the colour menus (#367); previously minor: File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (Export button in the title bar; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
@@ -59,7 +60,7 @@ AGENTS.md §2). Dimension score: **~60% ready** (estimated), **30–50 h** to pa
 | Status bar: slide counter, language, notes, comments, views, zoom slider | yes | yes | |
 | Command search (Tell Me) | yes | command palette | |
 | Light / dark appearance | follows the system | light or dark; doesn't follow the system (#41) | 1–2 h |
-| Settings page | File › Options, a dialog with sections and no search | File › Settings: General, Themes, New Presentations, Keyboard Shortcuts, Backup and Reset tabs, with a search box over them; the title bar's gear opens it (`app.backstage {page: settings, tab}`) | |
+| Settings page | File › Options, a dialog with sections and no search | File › Settings: General, Themes, New Presentations, Keyboard Shortcuts, AI, Backup and Reset tabs, with a search box over them; the title bar's gear opens it (`app.backstage {page: settings, tab}`) | |
 | Interface size | follows the system's display scaling | Settings › General: 90–175% presets and 5% steps, 75–200% (`view.interfaceSize`) | |
 | Reduce motion | follows the system's animation setting | Settings › General › Reduce motion: no animated menus, panes or scrolling; slide animations still play (`view.reduceMotion`) | |
 | What opens at start | Options › General: show the Start screen or not | Settings › General: the start screen, the last presentation or a blank one (`app.startup`); files given to DeckCraft always open | |
@@ -67,6 +68,7 @@ AGENTS.md §2). Dimension score: **~60% ready** (estimated), **30–50 h** to pa
 | Back up and restore settings | none in the app (settings roam with an account) | Settings › Backup and Reset: every setting to a JSON file and back, recent files left out (`settings.export`, `settings.import`) | |
 | Keyboard shortcut cheat sheet | none (a help page online) | Settings › Keyboard Shortcuts: Save cheat sheet… (a page to print, with your own keys) and Copy as text (`keys.cheatSheet`) | |
 | Custom keyboard shortcuts | no (fixed shortcuts) | File › Settings › Keyboard Shortcuts: own keys for any command and the slide-show actions, recorded from a key press, several per action, a warning before taking another action's key, reset per action or all (`keys.list`, `keys.set`, `keys.reset`, #127). Editor keys need Ctrl, Alt or a function key | |
+| AI with your own model | Copilot: Microsoft's cloud model with a Microsoft 365 subscription | File › Settings › AI (#732): any OpenAI-compatible server (Ollama and LM Studio on this computer, OpenAI, LocalAI, vLLM…) with your own address, model and key (`settings.ai`); Test connection (`ai.test`); Draft slides from a prompt, built as Markdown outline slides after the current one, one undo (`ai.draftSlides`). Desktop only; the key is kept in its own file, out of settings backups. No chat pane, rewriting or images yet | |
 | Reset all settings | none (delete the registry key or the preference files) | File › Settings › Backup and Reset, confirmed in place (`app.resetSettings`); recent files stay | |
 | Interface themes and high contrast | Office Theme (Colorful, Dark Gray, Black, White) on File › Account; follows the system's high-contrast mode | File › Settings › Themes (also the title bar’s gear): Standard, High Contrast (WCAG AAA text, outlined controls), Lagoon, Sunset and Custom (own tint and accent, text kept readable), each light or dark, with previews (`view.uiTheme`); doesn't follow the system's high-contrast setting | 1–2 h |
 | One window per presentation, New Window, Arrange All | yes | New Window opens one more window on the same presentation (its own slide, live with edits); tabs stay in the first window; no Arrange All | Arrange All |
@@ -240,6 +242,7 @@ consistency is open (#73, #56).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | AI with your own model: File › Settings › AI and Draft slides (#732) |
 | 2026-10-13 | minor | Settings page, interface size, reduce motion, startup, new-presentation defaults, settings backup and shortcut cheat sheet rows |
 | 2026-10-13 | minor | Custom keyboard shortcuts and Reset all settings rows |
 | 2026-10-13 | minor | Interface themes on File › Account, and the title bar's gear that opens it |

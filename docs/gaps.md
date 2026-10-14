@@ -449,14 +449,18 @@ Detail in [localization-parity.md](localization-parity.md).
 
 ## AI features
 
-- **No Designer, Copilot, Speaker Coach, live subtitles or Translate.** All are Microsoft cloud
-  services; an offline rule-based Designer is in the catalogue (P2). Local models (speech-to-text
-  for subtitles, translation) need an owner decision on licensed models. 20–40 h.
+- **No Copilot chat, rewriting, Speaker Coach, live subtitles or Translate.** File › Settings › AI
+  (#732) connects your own OpenAI-compatible model (Ollama, LM Studio, OpenAI…) and drafts slides
+  from a prompt; asking it to rewrite, summarise or design a selection, a chat pane, images and the
+  web build are still to do. An offline rule-based Designer is in the catalogue (P2). Bundled local
+  models (speech-to-text for subtitles, translation) need an owner decision on licensed models.
+  15–35 h.
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | AI features: your own model and Draft slides landed (#732); chat, rewriting and the web build remain |
 | 2026-10-13 | minor | EMF/WMF rectangle clip regions (`INTERSECTCLIPRECT`, `EXCLUDECLIPRECT`, `EXTSELECTCLIPRGN`) limit later drawing. EMF+ records remain |
 | 2026-10-13 | minor | Embedded fonts are read, written and drawn (TrueType, OpenType, Embedded OpenType). The gap is now MicroType Express subsets, which are kept but not drawn |
 | 2026-10-13 | minor | WordArt Transform gallery: Shape Format ▸ Text Effects lists the 40 presets and No Transform; `format.textWarp` applies one (adjust handles still open) |

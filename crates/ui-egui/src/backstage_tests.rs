@@ -914,3 +914,137 @@ fn the_cheat_sheet_lists_every_shortcut() {
     assert!(html.starts_with("<!doctype html>") && html.contains("<kbd>"));
     assert!(h.state().status.as_ref().is_some_and(|s| s.0.contains("cheat sheet")), "{:?}", h.state().status);
 }
+
+/// Services whose AI requests are recorded and answered at once with `reply`.
+fn answering(reply: Result<serde_json::Value, String>) -> (Services, Rc<RefCell<Vec<crate::ai::AiCall>>>) {
+    let calls: Rc<RefCell<Vec<crate::ai::AiCall>>> = Default::default();
+    let log = calls.clone();
+    let services = Services {
+        ai_send: Some(Box::new(move |call| {
+            log.borrow_mut().push(call);
+            let (tx, rx) = std::sync::mpsc::channel();
+            tx.send(reply.clone()).unwrap();
+            rx
+        })),
+        ..Default::default()
+    };
+    (services, calls)
+}
+
+fn chat_reply(text: &str) -> Result<serde_json::Value, String> {
+    Ok(json!({"choices": [{"message": {"role": "assistant", "content": text}}]}))
+}
+
+/// Settings › AI (#732): the server, model and key are checked and kept; the key is never
+/// handed back and stays out of settings backups.
+#[test]
+fn ai_settings_are_checked_and_the_key_stays_out_of_backups() {
+    let mut app = new_app();
+    assert_eq!(app.ui.ai.endpoint, "http://localhost:11434/v1", "Ollama on this computer to start with");
+    let v = app.run("settings.ai", json!({"endpoint": " https://api.openai.com/v1 ", "model": "gpt-4o-mini", "key": " sk-secret "})).unwrap();
+    assert_eq!(v, json!({"endpoint": "https://api.openai.com/v1", "model": "gpt-4o-mini", "hasKey": true}));
+    assert_eq!(app.ai_key, "sk-secret");
+    assert!(app.run("settings.ai", json!({"endpoint": "api.openai.com"})).is_err());
+    assert!(app.run("settings.ai", json!({"model": "a\nb"})).is_err());
+    assert!(app.run("settings.ai", json!({"key": 5})).is_err());
+    assert_eq!(app.ui.ai.endpoint, "https://api.openai.com/v1", "a refused setting changes nothing");
+
+    let backup = app.run("settings.export", json!({})).unwrap().to_string();
+    assert!(backup.contains("gpt-4o-mini") && !backup.contains("sk-secret"));
+
+    assert_eq!(app.run("settings.ai", json!({"key": ""})).unwrap()["hasKey"], false);
+}
+
+/// Without a host that can send requests (the web build), AI says so instead of failing quietly.
+#[test]
+fn ai_without_a_host_that_can_send_says_so() {
+    let mut app = new_app();
+    let e = app.run("ai.test", json!({})).unwrap_err();
+    assert!(e.contains("desktop app"), "{e}");
+    let mut h = harness(new_app());
+    h.state_mut().run("app.backstage", json!({"page": "settings", "tab": "ai"})).unwrap();
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("this window can't reach an AI server").is_some());
+}
+
+/// Settings › AI › Draft slides: the prompt goes to the model, and its outline becomes slides
+/// after the current one, in one undoable step.
+#[test]
+fn draft_slides_turns_the_models_outline_into_slides() {
+    let outline = "<think>Planets, then moons.</think>\n```markdown\n## The planets\n- Eight of them\n  - Four rocky\n## Moons\n- Earth has one\n```";
+    let (services, calls) = answering(chat_reply(outline));
+    let mut h = harness(SlideApp::new(Session::with_new(), services));
+    h.state_mut().run("app.backstage", json!({"page": "settings", "tab": "ai"})).unwrap();
+    h.run_steps(3);
+    let before = h.state().session.active().unwrap().doc.slides.len();
+    h.get_by_role_and_label(Role::TextInput, "What the slides are about").click();
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::TextInput, "What the slides are about").type_text("The solar system");
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::Button, "Draft slides").click();
+    h.run_steps(4);
+
+    let call = calls.borrow().first().cloned().unwrap();
+    assert_eq!(call.url, "http://localhost:11434/v1/chat/completions");
+    assert_eq!(call.body["messages"][1]["content"], "The solar system");
+    let app = h.state_mut();
+    let doc = &app.session.active().unwrap().doc;
+    assert_eq!(doc.slides.len(), before + 2);
+    let texts: Vec<String> =
+        doc.slides[before].shapes.iter().filter_map(|s| s.text.as_ref()).flat_map(|t| t.paragraphs.iter().map(|p| p.text())).collect();
+    assert!(texts.iter().any(|t| t == "The planets") && texts.iter().any(|t| t == "Four rocky"), "{texts:?}");
+    assert!(app.ai.outcome.as_ref().is_some_and(|o| o.as_ref().is_ok_and(|m| m.contains("Added 2 slides"))), "{:?}", app.ai.outcome);
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.session.active().unwrap().doc.slides.len(), before, "one undo takes the drafted slides away");
+}
+
+/// A server's error, or a reply that isn't an outline, is shown and adds no slides.
+#[test]
+fn a_failed_draft_explains_and_adds_nothing() {
+    for (reply, says) in [
+        (Ok(json!({"error": {"message": "model 'llama9' not found"}})), "llama9"),
+        (chat_reply("Sorry, I can't help with that."), "didn't answer with an outline"),
+        (Err("Couldn't reach the AI server at http://localhost:11434/v1/chat/completions. Is it running?".to_string()), "Is it running"),
+    ] {
+        let (services, _) = answering(reply);
+        let mut h = harness(SlideApp::new(Session::with_new(), services));
+        let before = h.state().session.active().unwrap().doc.slides.len();
+        h.state_mut().run("ai.draftSlides", json!({"prompt": "Bees"})).unwrap();
+        h.run_steps(3);
+        let app = h.state();
+        assert_eq!(app.session.active().unwrap().doc.slides.len(), before);
+        let err = app.ai.outcome.clone().unwrap().unwrap_err();
+        assert!(err.contains(says), "{err}");
+    }
+}
+
+/// Test connection reports the model answering; a second request waits for the first.
+#[test]
+fn test_connection_reports_back_and_requests_go_one_at_a_time() {
+    let (services, calls) = answering(chat_reply("OK"));
+    let mut h = harness(SlideApp::new(Session::with_new(), services));
+    h.state_mut().run("app.backstage", json!({"page": "settings", "tab": "ai"})).unwrap();
+    h.run_steps(3);
+    h.get_by_label("Test connection").click();
+    h.run_steps(3);
+    assert_eq!(calls.borrow().len(), 1);
+    assert!(h.query_all_by_label_contains("Connected: llama3.2 answered").next().is_some());
+
+    // A request that never answers keeps the next one waiting.
+    let (tx, rx) = std::sync::mpsc::channel::<Result<serde_json::Value, String>>();
+    h.state_mut().ai.pending = Some((crate::ai::Job::Test, rx));
+    assert!(h.state_mut().run("ai.draftSlides", json!({"prompt": "Bees"})).unwrap_err().contains("still waiting"));
+    drop(tx);
+    h.run_steps(2);
+    assert!(h.state().ai.pending.is_none(), "a request that stopped is let go");
+    assert!(h.state().ai.outcome.as_ref().is_some_and(|o| o.is_err()));
+}
+
+/// The settings search finds the AI tab by the words people use for it.
+#[test]
+fn settings_search_finds_the_ai_tab() {
+    let tabs = |q: &str| settings_search(q).into_iter().map(|h| h.0).collect::<Vec<_>>();
+    assert!(tabs("ollama").contains(&SettingsTab::Ai));
+    assert!(tabs("api key").contains(&SettingsTab::Ai));
+    assert_eq!(SettingsTab::parse("AI"), Some(SettingsTab::Ai));
+}

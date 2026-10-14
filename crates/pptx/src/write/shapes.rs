@@ -437,7 +437,7 @@ pub fn shape(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, depth
             }
             w.close("p:grpSp");
         }
-        ShapeKind::Opaque { xml, preview, label } => opaque(w, x, o, cx, s, xml, *preview, label),
+        ShapeKind::Opaque { xml, preview, label, parts } => opaque(w, x, o, cx, s, xml, *preview, label, parts),
     }
 }
 
@@ -590,6 +590,15 @@ fn ink_shape(st: &deckcraft_model::InkStroke, i: usize) -> Option<Shape> {
         return None;
     }
     let (w, h) = ((x1 - x0).max(1.0), (y1 - y0).max(1.0));
+    // PPTX keeps one line width. A pressured stroke exports at its mean sample width;
+    // a legacy flat `0.5` stroke stays at the pen width.
+    let legacy = deckcraft_model::ink_pressure_is_legacy(&st.points);
+    let width = if legacy {
+        st.width
+    } else {
+        let n = st.points.len().max(1) as f64;
+        st.points.iter().map(|p| deckcraft_model::ink_sample_width(st.width, p.2, false)).sum::<f64>() / n
+    };
     let mut d = String::new();
     for (k, (px, py)) in pts.iter().enumerate() {
         d.push_str(if k == 0 { "M " } else { "L " });
@@ -608,7 +617,7 @@ fn ink_shape(st: &deckcraft_model::InkStroke, i: usize) -> Option<Shape> {
         line: Some(deckcraft_model::Line {
             cap: Some(deckcraft_model::style::LineCap::Round),
             join: Some(deckcraft_model::style::LineJoin::Round),
-            ..deckcraft_model::Line::solid(c, st.width.max(0.25))
+            ..deckcraft_model::Line::solid(c, width.max(0.25))
         }),
         ..Default::default()
     })
@@ -646,7 +655,15 @@ fn sp(w: &mut W, x: &mut Exp, o: &mut Out, id: u32, s: &Shape, math: bool) {
         style(w, st);
     }
     if let Some(tb) = &s.text {
-        dml::text_body(w, x, o, "p:txBody", tb, math);
+        // A shape's text without its own anchor sits in the middle in the model; a file without
+        // one would put it at the top, so say so.
+        if s.ph.is_none() && !s.text_box && tb.body.anchor.is_none() {
+            let mut tb = tb.clone();
+            tb.body.anchor = Some(deckcraft_model::text::Anchor::Middle);
+            dml::text_body(w, x, o, "p:txBody", &tb, math);
+        } else {
+            dml::text_body(w, x, o, "p:txBody", tb, math);
+        }
     }
     w.close("p:sp");
 }
@@ -815,13 +832,32 @@ fn media(w: &mut W, x: &mut Exp, o: &mut Out, id: u32, s: &Shape, m: &deckcraft_
 }
 
 #[allow(clippy::too_many_arguments)]
-fn opaque(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, xml: &str, preview: Option<deckcraft_model::MediaId>, label: &str) {
-    // Kept XML that references no relationships can be written back as it was.
+fn opaque(
+    w: &mut W,
+    x: &mut Exp,
+    o: &mut Out,
+    cx: &mut Ctx,
+    s: &Shape,
+    xml: &str,
+    preview: Option<deckcraft_model::MediaId>,
+    label: &str,
+    parts: &[(String, String, deckcraft_model::MediaId)],
+) {
+    // Kept XML is written back as it was when every part it references was kept too, with those
+    // parts re-added under this slide's relationship ids.
     if let Ok(doc) = crate::xml::parse(xml.as_bytes())
-        && !crate::read::has_rel_refs(&doc.root)
         && matches!(doc.root.local(), "graphicFrame" | "sp" | "grpSp" | "cxnSp")
+        && let Some(ids) = crate::read::rel_refs(&doc.root)
+            .iter()
+            .map(|r| {
+                let (_, kind, m) = parts.iter().find(|(id, ..)| id == r)?;
+                Some((r.clone(), x.media_rel(o, *m, kind)?))
+            })
+            .collect::<Option<std::collections::HashMap<_, _>>>()
     {
         let mut root = doc.root;
+        set_rel_ids(&mut root, &ids, 0);
+        ole_fallback(&mut root, x, o, preview);
         let id = cx.id_for(s);
         set_cnvpr_id(&mut root, id);
         w.raw(&root.to_xml());
@@ -868,6 +904,52 @@ fn shape_with_id(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, i
         w.close("p:pic");
     } else {
         shape(w, x, o, cx, s, 0);
+    }
+}
+
+/// A legacy OLE object finds its preview in the slide's VML drawing through `spid`, and PowerPoint
+/// won't open the slide without it. We don't write that drawing, so write PowerPoint's own
+/// fallback form instead: no `spid`, and the preview as a `p:pic`.
+fn ole_fallback(root: &mut crate::xml::El, x: &mut Exp, o: &mut Out, preview: Option<deckcraft_model::MediaId>) {
+    let xfrm = root.child("xfrm").map(|t| {
+        let at = |e: &str, a: &str| t.child(e).and_then(|c| c.attr(a)).unwrap_or("0").to_string();
+        (at("off", "x"), at("off", "y"), at("ext", "cx"), at("ext", "cy"))
+    });
+    let Some(ole) = root
+        .elements_mut()
+        .find(|e| e.is("graphic"))
+        .and_then(|g| g.elements_mut().find(|e| e.is("graphicData")))
+        .and_then(|d| d.elements_mut().find(|e| e.is("oleObj")))
+    else {
+        return;
+    };
+    if ole.child("pic").is_some() || ole.attr("spid").is_none() {
+        return;
+    }
+    ole.attrs.retain(|(k, _)| k != "spid");
+    let rel = preview.and_then(|m| x.media_rel(o, m, "image")).unwrap_or_else(|| x.placeholder_rel(o));
+    let (ox, oy, cx, cy) = xfrm.unwrap_or_default();
+    let pic = format!(
+        r#"<p:pic><p:nvPicPr><p:cNvPr id="0" name=""/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="{rel}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="{ox}" y="{oy}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>"#
+    );
+    if let Ok(d) = crate::xml::parse(pic.as_bytes()) {
+        ole.children.push(crate::xml::Node::El(d.root));
+    }
+}
+
+fn set_rel_ids(e: &mut crate::xml::El, ids: &std::collections::HashMap<String, String>, depth: usize) {
+    if depth > crate::xml::MAX_DEPTH {
+        return;
+    }
+    for (k, v) in &mut e.attrs {
+        if crate::read::is_rel_attr(k, v)
+            && let Some(new) = ids.get(v.as_str())
+        {
+            v.clone_from(new);
+        }
+    }
+    for c in e.elements_mut() {
+        set_rel_ids(c, ids, depth + 1);
     }
 }
 

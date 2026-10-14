@@ -36,6 +36,65 @@ fn shape_fill_uses_theme_accent() {
 }
 
 #[test]
+fn render_shapes_draws_the_selection_on_a_transparent_canvas() {
+    let sh = Shape {
+        id: ShapeId(880),
+        xfrm: Some(Xfrm::new(100.0, 80.0, 60.0, 40.0)),
+        fill: Some(deckcraft_model::Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 0, 0)))),
+        line: Some(deckcraft_model::Line::none()),
+        ..Default::default()
+    };
+    let p = deck_with(vec![sh]);
+    let img = render_shapes(&p, &p.slides[0], &[ShapeId(880)], 1.0).expect("picture");
+    let mid = img.pixel(img.width / 2, img.height / 2);
+    assert!(mid[0] > 200 && mid[1] < 40 && mid[3] > 200, "{mid:?}");
+    assert_eq!(img.pixel(0, 0)[3], 0, "{:?}", img.pixel(0, 0));
+}
+
+#[test]
+fn ink_pressure_tapers_the_stroke_and_a_flat_half_stays_full_width() {
+    let opts = RenderOpts { scale: 1.0, ..Default::default() };
+    let tapered = render_slide(&ink_line(1.0, 0.12), 0, &opts);
+    let flat = render_slide(&ink_line(0.5, 0.5), 0, &opts);
+    let full = render_slide(&ink_line(1.0, 1.0), 0, &opts);
+    let heavy = dark_in(&tapered, 50, 140, 70, 130);
+    let light = dark_in(&tapered, 280, 360, 70, 130);
+    assert!(heavy > light * 3, "a firm point covers more of the slide than a light one ({heavy} vs {light})");
+    let (a, b) = (dark_in(&flat, 40, 370, 70, 130), dark_in(&full, 40, 370, 70, 130));
+    assert!(a > 100 && (a as i32 - b as i32).unsigned_abs() * 10 < a as u32, "the old constant 0.5 still draws at the pen width ({a} vs {b})");
+}
+
+fn ink_line(left: f32, right: f32) -> Presentation {
+    let points = (0..=40)
+        .map(|i| {
+            let pressure = if i < 20 { left } else { right };
+            (40.0 + f64::from(i) * 8.0, 100.0, pressure)
+        })
+        .collect();
+    let sh = Shape {
+        id: ShapeId(7),
+        xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)),
+        kind: ShapeKind::Ink {
+            strokes: vec![deckcraft_model::InkStroke { points, color: deckcraft_color::Rgba::rgb(0, 0, 0), width: 24.0, highlighter: false }],
+        },
+        ..Default::default()
+    };
+    deck_with(vec![sh])
+}
+
+fn dark_in(img: &Image, x0: u32, x1: u32, y0: u32, y1: u32) -> usize {
+    let mut n = 0;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            if img.pixel(x, y)[0] < 200 {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+#[test]
 fn text_draws_ink() {
     let mut sh = Shape { id: ShapeId(501), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), text_box: true, ..Default::default() };
     let mut t = TextBody::from_text("HELLO WORLD");
@@ -342,6 +401,34 @@ fn horizontal_bars_list_the_first_category_at_the_bottom_unless_reversed() {
     };
     assert!(draw(false) > 360, "first category at the bottom: {}", draw(false));
     assert!(draw(true) < 180, "reversed: first category at the top: {}", draw(true));
+}
+
+#[test]
+fn glow_of_an_unfilled_shape_follows_its_line() {
+    // A frame (no fill, thin line) with a strong glow: the glow lines its edge, the inside stays
+    // the slide's white, as PowerPoint draws it.
+    let glow = |fill: Option<Fill>| {
+        let mut sh = Shape {
+            id: ShapeId(610),
+            xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 300.0)),
+            fill,
+            line: Some(deckcraft_model::style::Line::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 176, 240)), 0.25)),
+            ..Default::default()
+        };
+        sh.effects = Some(deckcraft_model::Effects {
+            glow: Some(deckcraft_model::style::Glow { color: ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 0, 255)), radius: 8.0 }),
+            ..Default::default()
+        });
+        render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() })
+    };
+    let img = glow(Some(Fill::None));
+    let inside = img.pixel(300, 250);
+    assert!(inside[0] > 245 && inside[1] > 245, "{inside:?}");
+    let edge = img.pixel(300, 97);
+    assert!(edge[0] < 230, "{edge:?}");
+    // A filled shape's glow is still the whole silhouette's (the fill covers its inside).
+    let img = glow(Some(Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 255, 255)))));
+    assert!(img.pixel(300, 94)[0] < 240);
 }
 
 #[test]
@@ -654,6 +741,29 @@ fn morph_path_fades_a_fill_only_one_side_has() {
     assert!(full[0] < 128, "{full:?}");
     // Halfway the fill is half there: between the full colour and the white slide.
     assert!(half[0] > full[0] + 40 && half[0] < 215, "{half:?} vs {full:?}");
+}
+
+#[test]
+fn morph_path_aligns_once_per_transition() {
+    let (from, to) = (Xfrm::new(0.0, 0.0, 200.0, 200.0), Xfrm::new(0.0, 0.0, 300.0, 150.0));
+    let star = Shape { geom: Geom::preset("star5"), ..Default::default() };
+    let pm = |t: f64| PathMorph { id: ShapeId(10), from: Geom::preset("ellipse"), from_box: from, to_box: to, t };
+    let els = |(g, f): (deckcraft_geom::preset::Geometry, Vec<_>)| (g.paths.iter().map(|p| p.path.elements().to_vec()).collect::<Vec<_>>(), f);
+    let mut cache = morph_path::Cache::default();
+    for t in [0.0, 0.3, 0.7, 1.0] {
+        let got = els(cache.geometry(&pm(t), &star, 250.0, 175.0));
+        // The same as aligning afresh.
+        assert_eq!(got, els(morph_path::Cache::default().geometry(&pm(t), &star, 250.0, 175.0)));
+        cache.sweep();
+    }
+    assert_eq!(cache.len(), 1);
+    // Another target outline is another morph.
+    let _ = cache.geometry(&pm(0.5), &Shape { geom: Geom::preset("rect"), ..Default::default() }, 250.0, 175.0);
+    assert_eq!(cache.len(), 2);
+    // A frame without morphs ends the transition: the cache empties.
+    cache.sweep();
+    cache.sweep();
+    assert_eq!(cache.len(), 0);
 }
 
 #[test]
@@ -1413,7 +1523,7 @@ fn an_object_deckcraft_doesnt_model_shows_its_preview_picture() {
         let sh = Shape {
             id: ShapeId(600),
             xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 200.0)),
-            kind: ShapeKind::Opaque { xml: String::new(), preview: with_preview.then_some(media), label: "Package".into() },
+            kind: ShapeKind::Opaque { xml: String::new(), preview: with_preview.then_some(media), label: "Package".into(), parts: vec![] },
             ..Default::default()
         };
         std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
@@ -2376,4 +2486,17 @@ fn render_an_emf_file_to_look_at() {
     std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
     let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
     let _ = std::fs::write(out, img.to_png());
+}
+
+#[test]
+fn single_series_column_chart_varies_colours_by_point() {
+    let render = |vary: bool| {
+        let mut c = Chart::sample(ChartType::Column);
+        c.series.truncate(1);
+        c.vary_colors = vary;
+        let sh =
+            Shape { id: ShapeId(800), xfrm: Some(Xfrm::new(50.0, 50.0, 400.0, 300.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+        render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() }).pixels
+    };
+    assert_ne!(render(true), render(false));
 }

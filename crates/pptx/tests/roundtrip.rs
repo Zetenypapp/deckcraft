@@ -491,9 +491,40 @@ fn pictures_media_and_ink_round_trip() {
     assert_eq!((m.trim_start_ms, m.fade_in_ms), (500, 250));
     assert!(q.media(m.media).is_some_and(|x| x.data.starts_with(b"\x00\x00\x00\x18ftyp")));
     assert!(m.poster.is_some());
-    // Ink comes back as freeform lines in a group.
+    // Ink comes back as freeform lines in a group. A flat 0.5 stroke keeps the pen width.
     let ink = by_name(&q.slides[2], "Ink");
-    assert!(matches!(&ink.kind, ShapeKind::Group { children, .. } if children.len() == 1 && matches!(children[0].geom, Geom::Custom { .. })));
+    let ShapeKind::Group { children, .. } = &ink.kind else { panic!("ink is not a group: {:?}", ink.kind) };
+    assert_eq!(children.len(), 1);
+    assert!(matches!(children[0].geom, Geom::Custom { .. }));
+    let w = children[0].line.as_ref().and_then(|l| l.width).unwrap_or(0.0);
+    assert!((w - 3.0).abs() < 0.05, "a flat 0.5 stroke keeps the pen width, got {w}");
+}
+
+#[test]
+fn pressured_ink_exports_at_its_mean_width() {
+    let mut p = Presentation::default();
+    let id = ShapeId(p.alloc_id());
+    let slide = std::sync::Arc::make_mut(&mut p.slides[0]);
+    slide.shapes.push(Shape {
+        id,
+        name: "Ink".into(),
+        xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)),
+        kind: ShapeKind::Ink {
+            strokes: vec![InkStroke {
+                points: vec![(10.0, 10.0, 1.0), (40.0, 10.0, 0.5), (80.0, 10.0, 0.0)],
+                color: Rgba::rgb(0, 0, 0),
+                width: 10.0,
+                highlighter: false,
+            }],
+        },
+        ..Default::default()
+    });
+    let q = round(&p);
+    let ink = by_name(&q.slides[0], "Ink");
+    let ShapeKind::Group { children, .. } = &ink.kind else { panic!("{:?}", ink.kind) };
+    let w = children[0].line.as_ref().and_then(|l| l.width).unwrap_or(0.0);
+    // Full, half, and the 8% floor: (10 + 5 + 0.8) / 3.
+    assert!((w - (10.0 + 5.0 + 0.8) / 3.0).abs() < 0.05, "{w}");
 }
 
 #[test]
@@ -1649,4 +1680,58 @@ fn radar_stock_and_combo_round_trip() {
             assert_eq!(a.values, b.values, "{ty}");
         }
     }
+}
+
+/// #203: SmartArt we can't draw kept its XML but lost its diagram parts on save.
+#[test]
+fn smartart_without_a_drawing_keeps_its_parts() {
+    let mut p = defaults::new_presentation(None);
+    let data = p.add_media(
+        "data1.xml",
+        "application/vnd.openxmlformats-officedocument.drawingml.diagramData+xml",
+        br#"<dgm:dataModel xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><dgm:ptLst><dgm:pt modelId="1"><dgm:t><a:p><a:r><a:t>Manager</a:t></a:r></a:p></dgm:t></dgm:pt></dgm:ptLst><dgm:extLst><a:ext uri="http://schemas.microsoft.com/office/drawing/2008/diagram"><dsp:dataModelExt xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram" relId="rId6"/></a:ext></dgm:extLst></dgm:dataModel>"#.to_vec(),
+    );
+    let mut parts = vec![("rId2".to_string(), "http://schemas.openxmlformats.org/officeDocument/2006/relationships/diagramData".to_string(), data)];
+    for (i, kind) in ["Layout", "QuickStyle", "Colors"].into_iter().enumerate() {
+        let xml = format!(r#"<dgm:{kind} xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram"/>"#).into_bytes();
+        let m = p.add_media(&format!("{kind}1.xml"), &format!("application/vnd.openxmlformats-officedocument.drawingml.diagram{kind}+xml"), xml);
+        parts.push((format!("rId{}", i + 3), format!("http://schemas.openxmlformats.org/officeDocument/2006/relationships/diagram{kind}"), m));
+    }
+    let xml = r#"<p:graphicFrame xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:nvGraphicFramePr><p:cNvPr id="4" name="Diagram 3"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/diagram"><dgm:relIds xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" r:dm="rId2" r:lo="rId3" r:qs="rId4" r:cs="rId5"/></a:graphicData></a:graphic></p:graphicFrame>"#;
+    let mut s = new_slide(&mut p, "SmartArt");
+    let mut frame = shape(&mut p, "Diagram 3", 0.0, 0.0, 72.0, 72.0);
+    frame.kind = ShapeKind::Opaque { xml: xml.into(), preview: None, label: "SmartArt".into(), parts };
+    s.shapes.push(frame);
+    p.slides.push(Arc::new(s));
+
+    // Twice: the second save starts from what the first one wrote.
+    let q = round(&round(&p));
+    let ShapeKind::Opaque { parts, .. } = &by_name(&q.slides[1], "Diagram 3").kind else { panic!("not kept as an object") };
+    assert_eq!(parts.len(), 4, "data, layout, style and colours all kept");
+    let data = q.media(parts.iter().find(|(_, k, _)| k.ends_with("/diagramData")).expect("data").2).expect("media");
+    let data = String::from_utf8_lossy(&data.data);
+    assert!(data.contains("Manager"), "{data}");
+    assert!(!data.contains("dataModelExt"), "the link to a drawing that isn't written is dropped: {data}");
+}
+
+/// #203: a legacy OLE object (preview in the VML drawing we don't write) is saved in PowerPoint's
+/// fallback form, without `spid` and with a `p:pic` preview, or PowerPoint won't open the file.
+#[test]
+fn legacy_ole_object_is_written_in_the_fallback_form() {
+    let mut p = defaults::new_presentation(None);
+    let bin = p.add_media("oleObject1.bin", "application/vnd.openxmlformats-officedocument.oleObject", b"\xD0\xCF\x11\xE0not-a-real-ole".to_vec());
+    let prev = p.add_media("image1.png", "image/png", png(4, 3, [10, 20, 30]));
+    let xml = r#"<p:graphicFrame xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:nvGraphicFramePr><p:cNvPr id="4" name="Object 3"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/presentationml/2006/ole"><p:oleObj spid="_x0000_s1026" name="Slide" r:id="rId4" progId="PowerPoint.Slide.8"><p:embed/></p:oleObj></a:graphicData></a:graphic></p:graphicFrame>"#;
+    let parts = vec![("rId4".to_string(), "http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject".to_string(), bin)];
+    let mut s = new_slide(&mut p, "OLE");
+    let mut frame = shape(&mut p, "Object 3", 0.0, 0.0, 72.0, 72.0);
+    frame.kind = ShapeKind::Opaque { xml: xml.into(), preview: Some(prev), label: "Slide".into(), parts };
+    s.shapes.push(frame);
+    p.slides.push(Arc::new(s));
+
+    let q = round(&round(&p));
+    let ShapeKind::Opaque { xml, parts, preview, .. } = &by_name(&q.slides[1], "Object 3").kind else { panic!("not kept as an object") };
+    assert!(xml.contains("<p:pic>") && !xml.contains("spid"), "{xml}");
+    assert!(preview.is_some(), "the preview picture is kept");
+    assert!(parts.iter().any(|(_, k, _)| k.ends_with("/oleObject")), "the embedding is kept: {parts:?}");
 }

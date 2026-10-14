@@ -44,6 +44,18 @@ fn point_fill(ctx: &Ctx, c: &Chart, i: usize, s: &deckcraft_model::chart::Series
     }
 }
 
+/// Fill of one bar: a `<c:dPt>` fill wins, and a single-series chart that varies colours by point uses one accent per point
+/// (not waterfalls, which are never read from a `<c:barChart>`).
+fn bar_fill(ctx: &Ctx, c: &Chart, si: usize, pi: usize, s: &deckcraft_model::chart::Series) -> Rgba {
+    if s.point_fills.iter().any(|(k, _)| *k == pi) {
+        return point_fill(ctx, c, si, s, pi);
+    }
+    if c.vary_colors && c.series.len() == 1 && s.fill.is_none() && c.kind != ChartType::Waterfall {
+        return series_color(ctx, c, pi);
+    }
+    series_fill(ctx, c, si, Some(s))
+}
+
 fn polyline(pts: &[Point]) -> BezPath {
     let mut p = BezPath::new();
     for (k, q) in pts.iter().enumerate() {
@@ -561,6 +573,8 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
         Some((b, _)) => to_v(b.powf(min)),
         None => to_v(clamp_soft(0.0, min, max)),
     };
+    // Error bars, drawn over every series: (position across the value axis, from, to, cap length, cap).
+    let mut err_marks: Vec<(f64, f64, f64, f64, bool)> = vec![];
     if let Some(bk) = bar_kind {
         let bars: Vec<(usize, &deckcraft_model::chart::Series)> =
             c.series.iter().enumerate().filter(|(_, s)| c.series_kind(s).is_bar_like()).collect();
@@ -574,6 +588,8 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
         let bar = band / (n - (n - 1.0) * ov + gap);
         let step = bar * (1.0 - ov);
         let group = bar + step * (n - 1.0);
+        // Error bars need each series' mean and spread: worked out once, not per point.
+        let stats: Vec<deckcraft_model::chart::SeriesStats> = bars.iter().map(|(_, s)| deckcraft_model::chart::SeriesStats::of(&s.values)).collect();
         for i in 0..ncat {
             let mut pos_acc = 0.0;
             let mut neg_acc = 0.0;
@@ -619,7 +635,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
                     };
                     series_color(rctx, c, slot)
                 } else {
-                    point_fill(rctx, c, *si, s, i)
+                    bar_fill(rctx, c, *si, i, s)
                 };
                 ctx.set_transform(m);
                 ctx.set_paint(color(fill, 1.0));
@@ -632,6 +648,13 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
                     ctx.set_paint(color(Rgba::rgb(0xA6, 0xA6, 0xA6), 1.0));
                     ctx.set_stroke(kurbo::Stroke::new(0.75));
                     ctx.stroke_path(&j);
+                }
+                if let Some(e) = &s.error_bars {
+                    let (end, mid) = if horiz { (if v >= 0.0 { b } else { a }, r.center().y) } else { (if v >= 0.0 { b } else { a }, r.center().x) };
+                    if let Some((lo, hi)) = stats.get(bi).and_then(|st| e.range_in(st, i, end)) {
+                        let (p0, p1) = if horiz { (to_v(lo), to_v(hi)) } else { (to_axis(sec, lo), to_axis(sec, hi)) };
+                        err_marks.push((mid, p0, p1, bar.min(base * 0.8) * 0.5, e.end_cap));
+                    }
                 }
                 if c.data_labels {
                     let t = c.data_label(s, s.values.get(i).copied().flatten().unwrap_or(0.0));
@@ -696,6 +719,9 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
                 }
                 _ => plot.x0 + band * (slot(i) + 0.5),
             };
+            if let Some((lo, hi)) = s.error_bars.as_ref().and_then(|e| e.range(&s.values, i, v)) {
+                err_marks.push((x, to_axis(sec, lo), to_axis(sec, hi), base * 0.4, s.error_bars.as_ref().is_some_and(|e| e.end_cap)));
+            }
             pts.push(Point::new(x, to_axis(sec, v)));
         }
         if pts.is_empty() {
@@ -728,6 +754,25 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
     // A category position (0-based, fractional) as a slot, the way `slot` places the bars.
     let slot_at = |x: f64| if backwards { ncat as f64 - 1.0 - x + fwd } else { x + back };
     draw_trendlines(ctx, rctx, c, m, plot, band, &slot_at, xscale, ncat, horiz, base, text_col, &to_axis);
+    if !err_marks.is_empty() {
+        let mut p = BezPath::new();
+        for &(mid, a, b, cap, end_cap) in &err_marks {
+            // A horizontal bar chart's error bars run across, its value axis being horizontal.
+            let pt = |along: f64, across: f64| if horiz { Point::new(along, across) } else { Point::new(across, along) };
+            p.move_to(pt(a, mid));
+            p.line_to(pt(b, mid));
+            if end_cap {
+                for e in [a, b] {
+                    p.move_to(pt(e, mid - cap));
+                    p.line_to(pt(e, mid + cap));
+                }
+            }
+        }
+        ctx.set_transform(m);
+        ctx.set_paint(color(text_col, 1.0));
+        ctx.set_stroke(kurbo::Stroke::new(0.75));
+        ctx.stroke_path(&p);
+    }
     // Axis line.
     let mut ax = BezPath::new();
     if horiz {

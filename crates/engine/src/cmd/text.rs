@@ -2,10 +2,11 @@
 
 use std::sync::Arc;
 
+use deckcraft_geom::{Affine, Point, Rect};
 use deckcraft_model::edit::{self as ed, Pos};
 use deckcraft_model::resolve::{self, Ctx};
-use deckcraft_model::text::{AutoFit, Hyperlink, Run, RunKind, RunProps, TextBody};
-use deckcraft_model::{Presentation, ShapeId, ShapeKind};
+use deckcraft_model::text::{Align, AutoFit, Hyperlink, Paragraph, Run, RunKind, RunProps, TextBody};
+use deckcraft_model::{Presentation, Shape, ShapeId, ShapeKind};
 use serde_json::{Value, json};
 
 use super::*;
@@ -25,6 +26,15 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!(noundo "text.edit", "Edit Text", [], Some("Enter"), "{id?, at?: [paragraph, char], end?: bool, cell?: [row, col], notes?: bool}", has_slide, edit),
         cmd!(noundo "text.exit", "Stop Editing Text", [], None, "{}", has_doc, exit),
+        cmd!(
+            noundo "text.autocorrect",
+            "AutoCorrect Options",
+            ["Tools"],
+            None,
+            "{on?, twoInitials?, sentenceCaps?, days?, capsLock?, fractions?: bool, add?: [from, to], remove?: from} → the options and the replacement list",
+            always,
+            autocorrect_options
+        ),
         cmd!("text.insert", "Type Text", [], None, "{text} (\\n = new paragraph, \\u000b = line break)", has_text, insert),
         cmd!("text.delete", "Delete Text", [], Some("Backspace"), "{dir?: backward|forward|wordBackward|wordForward}", has_text, delete),
         // The input method's composition: shown in place, an undo step only once committed.
@@ -105,7 +115,7 @@ fn body_mut<'a>(doc: &'a mut Presentation, sel: &Selection, t: &TextSel) -> Opti
 
 /// Edit the active text body and selection; refits auto-sizing text boxes afterwards.
 pub(crate) fn edit_text<T>(s: &mut Session, f: impl FnOnce(&mut TextBody, &mut TextSel) -> T) -> Result<T> {
-    let t0 = s.doc()?.selection.text.clone().ok_or_else(|| bad("text", "no text insertion point"))?;
+    let t0 = s.doc()?.selection.text.clone().ok_or_else(|| bad("text", NO_TEXT_POINT))?;
     // Materialise an inherited placeholder box before editing (so autofit can change it).
     let r = s.edit(|doc, sel| {
         let mut t = t0.clone();
@@ -174,20 +184,44 @@ pub(crate) fn ctx_for<'a>(doc: &'a Presentation, sel: &Selection) -> Option<Ctx<
 
 /// Lay out the text being edited (for vertical caret movement and hit testing).
 pub fn layout_for(st: &DocState, t: &TextSel) -> Option<deckcraft_text::TextLayout> {
-    if t.notes || t.cell.is_some() {
+    text_frame(st, t).map(|f| f.0)
+}
+
+/// The text being edited as it is drawn: its layout, and the transform from layout space to the
+/// slide (flips don't mirror text, vertical text is turned). Shapes and table cells alike; the
+/// caret, the text selection, hit testing and caret movement all use it. `None` for notes.
+pub fn text_frame(st: &DocState, t: &TextSel) -> Option<(deckcraft_text::TextLayout, Affine)> {
+    if t.notes {
         return None;
     }
     let sh = st.shape(t.shape)?;
-    let body = sh.text.as_ref()?;
     let ctx = ctx_for(&st.doc, &st.selection)?;
+    let lay = |s: &Shape, body: &TextBody, rect: Rect| {
+        deckcraft_text::layout(&ctx, s, body, &deckcraft_text::Opts { rect, fields: &deckcraft_text::NoFields, prompt_color: None, no_shrink: false })
+    };
+    if let Some((r, c)) = t.cell {
+        // A cell's text is laid out in the cell's rect with the cell's margins, anchor and the
+        // table style's text look, exactly as the table draws it.
+        let placed = cell_on_slide(st, t.shape, r, c)?;
+        return Some((placed.layout, placed.to_slide));
+    }
+    let body = sh.text.as_ref()?;
     let x = xfrm_of(&st.doc, &st.selection, sh);
-    let geo = deckcraft_render::shape_geometry(sh, x.w, x.h);
-    Some(deckcraft_text::layout(
-        &ctx,
-        sh,
-        body,
-        &deckcraft_text::Opts { rect: geo.text_rect, fields: &deckcraft_text::NoFields, prompt_color: None, no_shrink: false },
-    ))
+    let tr = deckcraft_render::shape_geometry(sh, x.w, x.h).text_rect;
+    let l = lay(sh, body, tr);
+    let m = deckcraft_render::text_transform(x.affine(), tr, l.rotation);
+    Some((l, m))
+}
+
+/// The text position under slide point `p` in the text being edited (its shape or cell).
+pub fn text_pos_at(st: &DocState, t: &TextSel, p: Point) -> Pos {
+    match text_frame(st, t) {
+        Some((l, m)) => {
+            let h = l.hit(m.inverse() * p);
+            (h.para, h.ch)
+        }
+        None => (0, 0),
+    }
 }
 
 /// The insertion point on the slide: its line from top to bottom, in slide coordinates (flips and
@@ -223,6 +257,22 @@ pub fn caret_line(st: &DocState, t: &TextSel) -> Option<(deckcraft_geom::Point, 
     let (cx, top, bot) = l.caret_drawn(deckcraft_text::Pos { para: t.caret.0, ch: t.caret.1 }, aff)?;
     let m = deckcraft_render::text_transform(x.affine(), geo.text_rect, l.rotation);
     Some((m * deckcraft_geom::Point::new(cx, top), m * deckcraft_geom::Point::new(cx, bot)))
+}
+
+/// The colour of text typed at the caret. The canvas draws the caret in it, so the caret shows
+/// wherever the text does: light on a dark slide, dark on a light one. `None` when that text
+/// has no fill to take a colour from.
+pub fn caret_color(st: &DocState, t: &TextSel) -> Option<deckcraft_color::Rgba> {
+    if t.notes || t.cell.is_some() {
+        return None;
+    }
+    let sh = st.shape(t.shape)?;
+    let body = sh.text.as_ref()?;
+    let ctx = ctx_for(&st.doc, &st.selection)?;
+    let blank = Paragraph::default();
+    let para = body.paragraphs.get(t.caret.0).unwrap_or(&blank);
+    let props = resolve::run(&ctx, sh, para, &ed::props_at(body, t.caret));
+    Some(resolve::text_color(&ctx, &props)).filter(|c| c.a > 0)
 }
 
 fn pos_param(p: &Value, key: &str) -> Option<Pos> {
@@ -296,6 +346,7 @@ fn typed(s: &Session, body: &TextBody, at: Pos, text: &str) -> String {
 }
 
 pub(crate) fn insert_text(s: &mut Session, text: &str, props: Option<RunProps>) -> Result<Value> {
+    let inherited = inherited_aligns_for_edit(s);
     let text = {
         let st = s.doc()?;
         match &st.selection.text {
@@ -313,10 +364,51 @@ pub(crate) fn insert_text(s: &mut Session, text: &str, props: Option<RunProps>) 
         let c = ed::insert(body, at, &text, props);
         t.anchor = c;
         t.caret = c;
+        for pi in at.0..=c.0 {
+            if let Some(para) = body.paragraphs.get_mut(pi) {
+                promote_rtl_if_needed(para, &inherited);
+            }
+        }
         c
     })?;
-    autocorrect(s)?;
+    autocorrect(s, text.chars().count() == 1)?;
     Ok(json!({"caret": [pos.0, pos.1]}))
+}
+
+/// Per outline level (0..=8), whether shape `id` on the current slide already resolves an
+/// alignment for its paragraphs (its own list style, the layout's or the master's). All `false`
+/// when the shape can't be resolved (notes, a shape that is gone).
+fn inherited_aligns(s: &Session, id: ShapeId) -> [bool; 9] {
+    let mut out = [false; 9];
+    let Ok(st) = s.doc() else { return out };
+    let Some(sh) = st.shape(id) else { return out };
+    let Some(ctx) = ctx_for(&st.doc, &st.selection) else { return out };
+    for (lvl, set) in out.iter_mut().enumerate() {
+        let para = deckcraft_model::text::Paragraph { level: lvl as u8, ..Default::default() };
+        *set = resolve::para(&ctx, sh, &para).align.is_some();
+    }
+    out
+}
+
+/// The aligns [`inherited_aligns`] gives for the text being edited (none for notes).
+fn inherited_aligns_for_edit(s: &Session) -> [bool; 9] {
+    match s.doc().ok().and_then(|st| st.selection.text.clone()) {
+        Some(t) if !t.notes => inherited_aligns(s, t.shape),
+        _ => [false; 9],
+    }
+}
+
+/// A paragraph with no direction of its own whose first strong character is right-to-left
+/// (Arabic, Hebrew, Kurdish…) becomes right-to-left, and right-aligned when nothing (the
+/// paragraph or what it inherits, `inherited`) sets its alignment.
+fn promote_rtl_if_needed(para: &mut deckcraft_model::text::Paragraph, inherited: &[bool; 9]) {
+    if para.props.rtl.is_none() && deckcraft_model::bidi::first_strong_is_rtl(&para.text()) {
+        para.props.rtl = Some(true);
+        let inherits_align = inherited.get(usize::from(para.level)).copied().unwrap_or(false);
+        if para.props.align.is_none() && !inherits_align {
+            para.props.align = Some(Align::Right);
+        }
+    }
 }
 
 /// Typing right after a hyperlink doesn't extend it (as in PowerPoint): at the end of a linked
@@ -333,24 +425,148 @@ fn unlinked_at_link_end(body: &TextBody, at: Pos) -> Option<RunProps> {
     Some(props)
 }
 
-const AUTOCORRECT: &[(&str, &str)] = &[
+/// Built-in AutoCorrect replacements (common slips and symbols).
+pub const AUTOCORRECT: &[(&str, &str)] = &[
     ("teh", "the"),
     ("adn", "and"),
     ("recieve", "receive"),
+    ("recieved", "received"),
     ("seperate", "separate"),
     ("occured", "occurred"),
+    ("occurence", "occurrence"),
     ("thier", "their"),
     ("wich", "which"),
+    ("acheive", "achieve"),
+    ("accross", "across"),
+    ("adress", "address"),
+    ("alot", "a lot"),
+    ("appearence", "appearance"),
+    ("arguement", "argument"),
+    ("basicly", "basically"),
+    ("beggining", "beginning"),
+    ("beleive", "believe"),
+    ("calender", "calendar"),
+    ("commitee", "committee"),
+    ("definately", "definitely"),
+    ("dont", "don't"),
+    ("doesnt", "doesn't"),
+    ("didnt", "didn't"),
+    ("isnt", "isn't"),
+    ("embarass", "embarrass"),
+    ("enviroment", "environment"),
+    ("existance", "existence"),
+    ("foward", "forward"),
+    ("freind", "friend"),
+    ("goverment", "government"),
+    ("happend", "happened"),
+    ("i", "I"),
+    ("ive", "I've"),
+    ("immediatly", "immediately"),
+    ("independant", "independent"),
+    ("knowlege", "knowledge"),
+    ("libary", "library"),
+    ("neccessary", "necessary"),
+    ("necesary", "necessary"),
+    ("noticable", "noticeable"),
+    ("occassion", "occasion"),
+    ("posession", "possession"),
+    ("prefered", "preferred"),
+    ("publically", "publicly"),
+    ("realy", "really"),
+    ("recomend", "recommend"),
+    ("refered", "referred"),
+    ("relevent", "relevant"),
+    ("succesful", "successful"),
+    ("tommorow", "tomorrow"),
+    ("tomorow", "tomorrow"),
+    ("truely", "truly"),
+    ("untill", "until"),
+    ("wierd", "weird"),
+    ("youre", "you're"),
     ("(c)", "©"),
     ("(r)", "®"),
     ("(tm)", "™"),
+    ("(e)", "€"),
+    ("...", "…"),
     ("->", "→"),
     ("<-", "←"),
+    ("=>", "⇒"),
     ("--", "–"),
 ];
 
-/// After a space or punctuation, replace a just-typed autocorrect entry.
-fn autocorrect(s: &mut Session) -> Result<()> {
+const DAYS: &[&str] = &["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+
+/// The replacement for `word` from your entries, then the built-in list.
+fn replacement(prefs: &crate::Prefs, word: &str) -> Option<String> {
+    if let Some((_, to)) = prefs.ac_entries.iter().find(|(k, _)| k == word) {
+        return Some(to.clone());
+    }
+    if let Some((_, to)) = prefs.ac_entries.iter().find(|(k, _)| k.eq_ignore_ascii_case(word)) {
+        return Some(to.clone());
+    }
+    let (k, to) = AUTOCORRECT.iter().find(|(k, _)| k.eq_ignore_ascii_case(word))?;
+    if prefs.ac_removed.iter().any(|r| r.eq_ignore_ascii_case(k)) {
+        return None;
+    }
+    // "i" only on its own, lower case.
+    if *k == "i" && word != "i" {
+        return None;
+    }
+    Some(if word.chars().next().is_some_and(char::is_uppercase) { ed::change_case(to, "sentence") } else { to.to_string() })
+}
+
+/// What a just-typed `word` becomes (`None`: unchanged). `sentence_start`: nothing but spaces
+/// or a sentence's end (`.`, `!`, `?`) before it in the paragraph. `typing`: one character was
+/// typed (the case rules apply only then).
+pub fn correct_word(prefs: &crate::Prefs, word: &str, sentence_start: bool, typing: bool) -> Option<String> {
+    let mut out = replacement(prefs, word);
+    if typing && out.is_none() {
+        let chars: Vec<char> = word.chars().collect();
+        let letters = chars.iter().all(|c| c.is_alphabetic());
+        if prefs.ac_fractions {
+            out = match word {
+                "1/2" => Some("½".into()),
+                "1/4" => Some("¼".into()),
+                "3/4" => Some("¾".into()),
+                _ => None,
+            };
+        }
+        if out.is_none() && letters && chars.len() >= 3 {
+            let upper = |c: &char| c.is_uppercase();
+            let rest_lower = chars.get(2..).is_some_and(|r| r.iter().all(|c| c.is_lowercase()));
+            let rest_upper = chars.get(1..).is_some_and(|r| r.iter().all(upper));
+            if prefs.ac_two_initials && chars.first().is_some_and(upper) && chars.get(1).is_some_and(upper) && rest_lower {
+                out =
+                    Some(chars.iter().enumerate().map(|(i, c)| if i == 1 { c.to_lowercase().collect::<String>() } else { c.to_string() }).collect());
+            } else if prefs.ac_caps_lock && chars.first().is_some_and(|c| c.is_lowercase()) && rest_upper {
+                out = Some(
+                    chars
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| if i == 0 { c.to_uppercase().collect::<String>() } else { c.to_lowercase().collect() })
+                        .collect(),
+                );
+            }
+        }
+        if out.is_none() && prefs.ac_days && DAYS.contains(&word) {
+            out = Some(ed::change_case(word, "sentence"));
+        }
+    }
+    if typing && prefs.ac_sentence_caps && sentence_start {
+        let w = out.clone().unwrap_or_else(|| word.to_string());
+        let mut cs = w.chars();
+        if let Some(f) = cs.next()
+            && f.is_lowercase()
+            && w.chars().all(char::is_alphabetic)
+        {
+            out = Some(f.to_uppercase().chain(cs).collect());
+        }
+    }
+    out.filter(|o| o != word)
+}
+
+/// After a space or punctuation, correct the word just typed.
+fn autocorrect(s: &mut Session, typing: bool) -> Result<()> {
     if !s.prefs.autocorrect {
         return Ok(());
     }
@@ -362,14 +578,31 @@ fn autocorrect(s: &mut Session) -> Result<()> {
     if end == 0 || !line.get(end - 1).is_some_and(|c| c.is_whitespace() || ".,;:!?".contains(*c)) {
         return Ok(());
     }
-    let word_end = end - 1;
+    let mut word_end = end - 1;
     let mut start = word_end;
     while start > 0 && line.get(start - 1).is_some_and(|c| !c.is_whitespace()) {
         start -= 1;
     }
-    let word: String = line.get(start..word_end).map(|w| w.iter().collect()).unwrap_or_default();
-    let Some((_, rep)) = AUTOCORRECT.iter().find(|(k, _)| k.eq_ignore_ascii_case(&word)) else { return Ok(()) };
-    let rep = if word.chars().next().is_some_and(char::is_uppercase) { ed::change_case(rep, "sentence") } else { rep.to_string() };
+    // "word," and "word." also count: the punctuation was typed before the space.
+    let mut word: String = line.get(start..word_end).map(|w| w.iter().collect()).unwrap_or_default();
+    if replacement(&s.prefs, &word).is_none() {
+        let trimmed = word.trim_end_matches(|c: char| ".,;:!?".contains(c));
+        if !trimmed.is_empty() && trimmed.len() < word.len() && !word.ends_with("...") {
+            word_end -= word.chars().count() - trimmed.chars().count();
+            word = trimmed.to_string();
+        }
+    }
+    let before = line.get(..start).map(|b| b.iter().rev().find(|c| !c.is_whitespace()).copied()).unwrap_or(None);
+    let sentence_start = before.is_none_or(|c| ".!?".contains(c));
+    // "word..." becomes "word…", the word corrected too.
+    let ellipsis = word.chars().count() > 3 && word.ends_with("...") && replacement(&s.prefs, "...").is_some();
+    let rep = if ellipsis {
+        let stem = word.trim_end_matches('.');
+        Some(format!("{}…", correct_word(&s.prefs, stem, sentence_start, typing).unwrap_or_else(|| stem.to_string())))
+    } else {
+        correct_word(&s.prefs, &word, sentence_start, typing)
+    };
+    let Some(rep) = rep else { return Ok(()) };
     let delta = rep.chars().count() as isize - word.chars().count() as isize;
     let st = s.doc_mut()?;
     let mut d = (*st.doc).clone();
@@ -388,13 +621,78 @@ fn autocorrect(s: &mut Session) -> Result<()> {
     Ok(())
 }
 
+fn autocorrect_options(s: &mut Session, p: &Value) -> Result<Value> {
+    let pr = &mut s.prefs;
+    for (key, slot) in [
+        ("on", &mut pr.autocorrect),
+        ("twoInitials", &mut pr.ac_two_initials),
+        ("sentenceCaps", &mut pr.ac_sentence_caps),
+        ("days", &mut pr.ac_days),
+        ("capsLock", &mut pr.ac_caps_lock),
+        ("fractions", &mut pr.ac_fractions),
+    ] {
+        if let Some(v) = p.get(key).and_then(Value::as_bool) {
+            *slot = v;
+        }
+    }
+    if let Some(Value::Array(a)) = p.get("add") {
+        let (Some(from), Some(to)) = (a.first().and_then(Value::as_str), a.get(1).and_then(Value::as_str)) else {
+            return Err(bad("text.autocorrect", "`add` is [from, to]"));
+        };
+        let from = from.trim();
+        if from.is_empty() || from.chars().any(char::is_whitespace) || from.chars().count() > 64 || to.chars().count() > 255 {
+            return Err(bad("text.autocorrect", "`from` is one word (up to 64 characters), `to` up to 255"));
+        }
+        pr.ac_entries.retain(|(k, _)| k != from);
+        pr.ac_removed.retain(|k| !k.eq_ignore_ascii_case(from));
+        if pr.ac_entries.len() >= 2000 {
+            return Err(bad("text.autocorrect", "the list is full"));
+        }
+        pr.ac_entries.push((from.to_string(), to.to_string()));
+    }
+    if let Some(from) = str_param(p, "remove") {
+        let had = pr.ac_entries.len();
+        pr.ac_entries.retain(|(k, _)| k != from);
+        if had == pr.ac_entries.len()
+            && AUTOCORRECT.iter().any(|(k, _)| k.eq_ignore_ascii_case(from))
+            && !pr.ac_removed.iter().any(|r| r.eq_ignore_ascii_case(from))
+        {
+            pr.ac_removed.push(from.to_string());
+        }
+    }
+    let list: Vec<(String, String)> = pr
+        .ac_entries
+        .iter()
+        .cloned()
+        .chain(
+            AUTOCORRECT
+                .iter()
+                .filter(|(k, _)| {
+                    !pr.ac_removed.iter().any(|r| r.eq_ignore_ascii_case(k)) && !pr.ac_entries.iter().any(|(e, _)| e.eq_ignore_ascii_case(k))
+                })
+                .map(|(k, v)| (k.to_string(), v.to_string())),
+        )
+        .collect();
+    Ok(json!({
+        "on": pr.autocorrect, "twoInitials": pr.ac_two_initials, "sentenceCaps": pr.ac_sentence_caps,
+        "days": pr.ac_days, "capsLock": pr.ac_caps_lock, "fractions": pr.ac_fractions,
+        "entries": list,
+    }))
+}
+
 pub(crate) fn paste_body(s: &mut Session, src: &TextBody) -> Result<Value> {
+    let inherited = inherited_aligns_for_edit(s);
     let pos = edit_text(s, |body, t| {
         let (a, b) = t.ordered();
         let at = ed::delete(body, a, b);
         let c = ed::insert_body(body, at, src);
         t.anchor = c;
         t.caret = c;
+        for pi in at.0..=c.0 {
+            if let Some(para) = body.paragraphs.get_mut(pi) {
+                promote_rtl_if_needed(para, &inherited);
+            }
+        }
         c
     })?;
     Ok(json!({"caret": [pos.0, pos.1]}))
@@ -501,6 +799,61 @@ fn commit(s: &mut Session, p: &Value) -> Result<Value> {
     s.end_composition();
     let caret = s.doc()?.selection.text.as_ref().map(|t| t.caret).unwrap_or_default();
     Ok(json!({"caret": [caret.0, caret.1]}))
+}
+
+/// Underlines (slide coordinates) under character ranges `(para, start, end)` of shape `id`'s
+/// text as laid out on the current slide: where spelling squiggles go.
+pub fn range_underlines(
+    st: &DocState,
+    id: deckcraft_model::ShapeId,
+    ranges: &[(usize, usize, usize)],
+) -> Vec<(deckcraft_geom::Point, deckcraft_geom::Point)> {
+    let Some(sh) = st.shape(id) else { return vec![] };
+    let Some(l) = layout_for(st, &TextSel { shape: id, ..Default::default() }) else { return vec![] };
+    let x = xfrm_of(&st.doc, &st.selection, sh);
+    let tr = deckcraft_render::shape_geometry(sh, x.w, x.h).text_rect;
+    let m = deckcraft_render::text_transform(x.affine(), tr, l.rotation);
+    let mut out = vec![];
+    for &(para, a, b) in ranges {
+        for (x0, x1, y) in l.composition_underlines(deckcraft_text::Pos { para, ch: a }, deckcraft_text::Pos { para, ch: b }) {
+            out.push((m * deckcraft_geom::Point::new(x0, y), m * deckcraft_geom::Point::new(x1, y)));
+        }
+    }
+    out
+}
+
+/// Like [`range_underlines`], for the text of table `id`'s cell at `row`, `col`.
+pub fn cell_range_underlines(
+    st: &DocState,
+    id: deckcraft_model::ShapeId,
+    row: usize,
+    col: usize,
+    ranges: &[(usize, usize, usize)],
+) -> Vec<(deckcraft_geom::Point, deckcraft_geom::Point)> {
+    let Some(sh) = st.shape(id) else { return vec![] };
+    let deckcraft_model::ShapeKind::Table(tb) = &sh.kind else { return vec![] };
+    let (Some(cell), Some(ctx)) = (tb.cell(row, col), ctx_for(&st.doc, &st.selection)) else { return vec![] };
+    let heights = crate::cmd::table_drawn_heights(&st.doc, &st.selection, tb);
+    let Some(rect) = deckcraft_render::table_cell_rects(tb, &heights).into_iter().find(|(r, c, _)| *r == row && *c == col).map(|(_, _, r)| r) else {
+        return vec![];
+    };
+    let body = deckcraft_render::table_cell_body(&ctx, tb, row, col, cell);
+    let tmp = deckcraft_model::Shape { text: Some(body.clone()), ..Default::default() };
+    let l = deckcraft_text::layout(
+        &ctx,
+        &tmp,
+        &body,
+        &deckcraft_text::Opts { rect, fields: &deckcraft_text::NoFields, prompt_color: None, no_shrink: false },
+    );
+    let x = xfrm_of(&st.doc, &st.selection, sh);
+    let m = deckcraft_render::text_transform(x.affine(), rect, l.rotation);
+    let mut out = vec![];
+    for &(para, a, b) in ranges {
+        for (x0, x1, y) in l.composition_underlines(deckcraft_text::Pos { para, ch: a }, deckcraft_text::Pos { para, ch: b }) {
+            out.push((m * deckcraft_geom::Point::new(x0, y), m * deckcraft_geom::Point::new(x1, y)));
+        }
+    }
+    out
 }
 
 /// Underlines under an input method's composition (#101), in slide coordinates: `(from, to,
@@ -773,6 +1126,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         None => s.doc()?.selection.shapes.first().copied().ok_or_else(|| bad("text.set", "missing `id` (or select a shape)"))?,
     };
     let cell = p.get("cell").and_then(Value::as_array).and_then(|a| Some((a.first()?.as_u64()? as usize, a.get(1)?.as_u64()? as usize)));
+    let inherited = inherited_aligns(s, id);
     edit_shapes(s, &json!({"id": id}), "text.set", |sh| {
         let target = match (&mut sh.kind, cell) {
             (ShapeKind::Table(t), Some((r, c))) => t.cell_mut(r, c).map(|x| &mut x.text),
@@ -791,6 +1145,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
                 para.level = *lv;
                 para.props = pp.clone();
             }
+            promote_rtl_if_needed(para, &inherited);
             for r in &mut para.runs {
                 r.props = keep.clone();
             }
@@ -840,7 +1195,7 @@ pub(crate) fn format_run(s: &mut Session, f: &(dyn Fn(&mut RunProps) + Send + Sy
     }
     let ids = st.selection.shapes.clone();
     if ids.is_empty() {
-        return Err(bad("format", "select text or a shape"));
+        return Err(bad("format", SELECT_TEXT_OR_SHAPE));
     }
     edit_shapes(s, &json!({"ids": ids}), "format", |sh| {
         match &mut sh.kind {
@@ -930,7 +1285,7 @@ pub(crate) fn format_para(s: &mut Session, f: &(dyn Fn(&mut deckcraft_model::tex
     }
     let ids = st.selection.shapes.clone();
     if ids.is_empty() {
-        return Err(bad("format", "select text or a shape"));
+        return Err(bad("format", SELECT_TEXT_OR_SHAPE));
     }
     edit_shapes(s, &json!({"ids": ids}), "format", |sh| {
         match &mut sh.kind {
@@ -998,6 +1353,30 @@ fn replace_font(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.doc_mut()?;
     st.missing_fonts = crate::fonts::missing_fonts(&st.doc);
     Ok(json!({"replaced": n}))
+}
+
+#[cfg(test)]
+mod rtl_promote_tests {
+    use deckcraft_model::text::{Align, Paragraph, Run};
+
+    use super::promote_rtl_if_needed;
+
+    fn para(text: &str) -> Paragraph {
+        Paragraph { runs: vec![Run::new(text)], ..Default::default() }
+    }
+
+    #[test]
+    fn right_aligns_only_when_no_alignment_is_set_or_inherited() {
+        let mut p = para("مرحبا");
+        promote_rtl_if_needed(&mut p, &[false; 9]);
+        assert_eq!((p.props.rtl, p.props.align), (Some(true), Some(Align::Right)));
+        let mut p = para("مرحبا");
+        promote_rtl_if_needed(&mut p, &[true; 9]);
+        assert_eq!((p.props.rtl, p.props.align), (Some(true), None));
+        let mut p = para("Hello مرحبا");
+        promote_rtl_if_needed(&mut p, &[false; 9]);
+        assert_eq!((p.props.rtl, p.props.align), (None, None));
+    }
 }
 
 #[cfg(test)]

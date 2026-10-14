@@ -505,7 +505,8 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("keys.cheatSheet", "Keyboard Shortcut Cheat Sheet", None, "{} → {text, html}"),
     ("settings.ai", "AI Settings", None, "{endpoint?: http(s) address up to /v1, model?, key?: \"\" forgets it} → {endpoint, model, hasKey}"),
     ("ai.test", "Test AI Connection", None, "{} (the answer arrives later, in File › Settings › AI)"),
-    ("ai.draftSlides", "Draft Slides with AI", None, "{prompt} (the slides arrive later, after the current slide)"),
+    ("ai.draftSlides", "Draft Slides with AI", None, "{prompt} (the slides arrive later, after the current slide; 50 at most)"),
+    ("ai.cancel", "Cancel AI Request", None, "{} → {cancelled: bool}"),
 ];
 
 pub struct Perf {
@@ -605,9 +606,9 @@ pub struct SlideApp {
     next_file_id: u64,
     /// Picks and drops whose bytes have not arrived yet.
     pending_files: Vec<PendingFile>,
-    /// File › Settings › AI: the API key. Not part of `UiState`, so it stays out of ui.json and
-    /// settings backups; the desktop app keeps it in a file of its own.
-    pub ai_key: String,
+    /// File › Settings › AI: the API key and the server it is for. Not part of `UiState`, so it
+    /// stays out of ui.json and settings backups; the desktop app keeps it in a file of its own.
+    pub ai_key: ai::ApiKey,
     /// AI requests in flight and their outcome.
     pub ai: ai::State,
 }
@@ -676,7 +677,7 @@ impl SlideApp {
             twisting: false,
             next_file_id: 1,
             pending_files: Vec::new(),
-            ai_key: String::new(),
+            ai_key: ai::ApiKey::default(),
             ai: ai::State::default(),
         }
     }
@@ -908,10 +909,21 @@ impl SlideApp {
         if let Some(m) = model {
             self.ui.ai.model = m;
         }
+        // A key belongs to the address it is typed with.
         if let Some(k) = key {
-            self.ai_key = k;
+            if !k.is_empty() && ai::chat_url(&self.ui.ai.endpoint).is_err() {
+                return Err("Type the server's address before its key: the key is only ever sent there.".into());
+            }
+            self.ai_key = ai::ApiKey::new(&self.ui.ai.endpoint, &k);
         }
-        Ok(json!({"endpoint": self.ui.ai.endpoint, "model": self.ui.ai.model, "hasKey": !self.ai_key.is_empty()}))
+        let key_for = (!self.ai_key.is_empty()).then(|| self.ai_key.host().to_string());
+        Ok(json!({
+            "endpoint": self.ui.ai.endpoint,
+            "model": self.ui.ai.model,
+            "hasKey": !self.ai_key.is_empty(),
+            "keyFor": key_for,
+            "keySentHere": !self.ai_key.for_endpoint(&self.ui.ai.endpoint).is_empty(),
+        }))
     }
 
     /// Hand an AI request to the host; one at a time.
@@ -943,16 +955,18 @@ impl SlideApp {
             (_, Err(e)) => Err(e),
             (ai::Job::Test, Ok(_)) => Ok(format!("Connected: {} answered.", self.ui.ai.model)),
             (ai::Job::Draft, Ok(t)) => {
-                let outline = ai::outline(&t);
-                if !outline.lines().any(|l| l.trim_start().starts_with('#')) {
+                let (outline, total) = ai::cap_slides(&ai::outline(&t));
+                let target = self.ai.target.take();
+                if total == 0 {
                     Err("The AI didn't answer with an outline. Try again, or try another model.".into())
-                } else if self.session.active().is_none() {
-                    Err("The presentation was closed before the slides arrived.".into())
+                } else if self.session.active().is_none_or(|d| Some(d.uid) != target) {
+                    Err("The presentation the slides were for isn't the one open now, so they weren't added.".into())
                 } else {
                     match self.run("slide.fromOutline", json!({"text": outline, "markdown": true})) {
                         Ok(v) => {
                             let n = v.get("slides").and_then(Value::as_u64).unwrap_or(0);
-                            Ok(format!("Added {n} slide{} after the current one. Undo takes them away.", if n == 1 { "" } else { "s" }))
+                            let cut = if total > ai::MAX_SLIDES { format!(" (the first {} of {total})", ai::MAX_SLIDES) } else { String::new() };
+                            Ok(format!("Added {n} slide{}{cut} after the current one. Undo takes them away.", if n == 1 { "" } else { "s" }))
                         }
                         Err(e) => Err(e),
                     }
@@ -1364,7 +1378,18 @@ impl SlideApp {
                 }
                 let prompt = p.get("prompt").and_then(Value::as_str).unwrap_or("");
                 let call = ai::draft_call(&self.ui.ai, &self.ai_key, prompt)?;
-                return self.ai_send(ai::Job::Draft, call);
+                let r = self.ai_send(ai::Job::Draft, call)?;
+                self.ai.target = self.session.active().map(|d| d.uid);
+                return Ok(r);
+            }
+            "ai.cancel" => {
+                // The request carries on in the background; its answer is dropped.
+                let was = self.ai.pending.take().is_some();
+                self.ai.target = None;
+                if was {
+                    self.ai.outcome = Some(Err("Cancelled.".into()));
+                }
+                return Ok(json!({"cancelled": was}));
             }
             "app.resetSettings" => {
                 // Every setting back to how DeckCraft ships; the recent files are a list of the

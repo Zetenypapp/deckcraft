@@ -1793,26 +1793,35 @@ fn ai_settings(app: &mut SlideApp, ui: &mut Ui, t: &Tokens) {
         ui.end_row();
         ui.label("API key");
         ui.horizontal(|ui| {
-            let mut key = app.ai_key.clone();
+            // Only the key for this address is shown (as dots); another server's key stays hidden.
+            let mut key = app.ai_key.for_endpoint(&app.ui.ai.endpoint).to_string();
             let field = ui.add(egui::TextEdit::singleline(&mut key).password(true).hint_text("Not needed on this computer").desired_width(280.0));
             field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "AI API key"));
             if field.changed() {
                 let _ = app.run("settings.ai", json!({"key": key}));
             }
-            if !app.ai_key.is_empty() && ui.button("Forget key").clicked() {
+            if !app.ai_key.is_empty() && ui.button("Forget key").on_hover_text(format!("The saved key is for {}", app.ai_key.host())).clicked() {
                 let _ = app.run("settings.ai", json!({"key": ""}));
             }
         });
         ui.end_row();
     });
-    dim(ui, "The key stays on this computer, apart from your other settings: a settings backup doesn't include it.");
-    if crate::ai::chat_url(&app.ui.ai.endpoint).is_err() {
-        ui.label(RichText::new("The address must start with http:// or https://.").color(ui.visuals().error_fg_color));
-    } else if crate::ai::key_in_the_clear(&app.ui.ai.endpoint, &app.ai_key) {
+    dim(
+        ui,
+        "The key stays on this computer, apart from your other settings (a settings backup doesn't include it), and goes only to the server it was typed for.",
+    );
+    let here = app.ai_key.for_endpoint(&app.ui.ai.endpoint);
+    if let Err(e) = crate::ai::chat_url(&app.ui.ai.endpoint) {
+        ui.label(RichText::new(e).color(ui.visuals().error_fg_color));
+    } else if crate::ai::key_in_the_clear(&app.ui.ai.endpoint, here) {
         ui.label(
-            RichText::new("This address starts with http://, so your key would travel unencrypted. Use https:// for a server on another computer.")
-                .color(ui.visuals().warn_fg_color),
+            RichText::new(
+                "DeckCraft won't send your key to this address: it starts with http://, so the key would travel unencrypted. Use https://.",
+            )
+            .color(ui.visuals().warn_fg_color),
         );
+    } else if here.is_empty() && !app.ai_key.is_empty() {
+        dim(ui, &format!("Your saved key is for {}, so DeckCraft doesn't send it to this address.", app.ai_key.host()));
     }
     ui.add_space(8.0);
     ui.horizontal(|ui| {
@@ -1823,6 +1832,9 @@ fn ai_settings(app: &mut SlideApp, ui: &mut Ui, t: &Tokens) {
         if waiting == Some(Job::Test) {
             ui.spinner();
             dim(ui, "Asking the server…");
+            if ui.button("Cancel").clicked() {
+                let _ = app.run("ai.cancel", json!({}));
+            }
         }
     });
 
@@ -1847,6 +1859,9 @@ fn ai_settings(app: &mut SlideApp, ui: &mut Ui, t: &Tokens) {
         if waiting == Some(Job::Draft) {
             ui.spinner();
             dim(ui, "Writing your slides… a model on this computer can take a minute.");
+            if ui.button("Cancel").clicked() {
+                let _ = app.run("ai.cancel", json!({}));
+            }
         } else if !has_doc {
             dim(ui, "Open or create a presentation first.");
         }

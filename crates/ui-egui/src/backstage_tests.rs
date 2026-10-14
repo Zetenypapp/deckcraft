@@ -942,17 +942,101 @@ fn ai_settings_are_checked_and_the_key_stays_out_of_backups() {
     let mut app = new_app();
     assert_eq!(app.ui.ai.endpoint, "http://localhost:11434/v1", "Ollama on this computer to start with");
     let v = app.run("settings.ai", json!({"endpoint": " https://api.openai.com/v1 ", "model": "gpt-4o-mini", "key": " sk-secret "})).unwrap();
-    assert_eq!(v, json!({"endpoint": "https://api.openai.com/v1", "model": "gpt-4o-mini", "hasKey": true}));
-    assert_eq!(app.ai_key, "sk-secret");
+    assert_eq!(
+        v,
+        json!({"endpoint": "https://api.openai.com/v1", "model": "gpt-4o-mini", "hasKey": true, "keyFor": "api.openai.com:443", "keySentHere": true})
+    );
+    assert_eq!(app.ai_key.secret, "sk-secret");
     assert!(app.run("settings.ai", json!({"endpoint": "api.openai.com"})).is_err());
     assert!(app.run("settings.ai", json!({"model": "a\nb"})).is_err());
     assert!(app.run("settings.ai", json!({"key": 5})).is_err());
     assert_eq!(app.ui.ai.endpoint, "https://api.openai.com/v1", "a refused setting changes nothing");
 
+    // Nothing the app hands out or saves holds the key: backups, ui.json, the inspector.
     let backup = app.run("settings.export", json!({})).unwrap().to_string();
     assert!(backup.contains("gpt-4o-mini") && !backup.contains("sk-secret"));
+    assert!(!serde_json::to_string(&app.ui).unwrap().contains("sk-secret"));
+    assert!(!crate::control::inspect(&app, &egui::Context::default()).to_string().contains("sk-secret"));
+    assert!(!format!("{:?}", app.ai_key).contains("sk-secret"));
 
     assert_eq!(app.run("settings.ai", json!({"key": ""})).unwrap()["hasKey"], false);
+}
+
+/// The key goes only to the server it was typed for: switching to another one (a preset, or a
+/// typed address) sends no key, and switching back sends it again.
+#[test]
+fn the_ai_key_is_never_sent_to_another_server() {
+    let (services, calls) = answering(chat_reply("OK"));
+    let mut app = SlideApp::new(Session::with_new(), services);
+    app.run("settings.ai", json!({"endpoint": "https://api.openai.com/v1", "model": "m", "key": "sk-live"})).unwrap();
+    for endpoint in ["http://localhost:11434/v1", "https://evil.example/v1", "https://api.openai.com.evil.example/v1", "https://api.openai.com/v1"] {
+        let v = app.run("settings.ai", json!({"endpoint": endpoint})).unwrap();
+        app.run("ai.test", json!({})).unwrap();
+        app.ai.pending = None;
+        let sent = calls.borrow().last().unwrap().key.clone();
+        let mine = endpoint == "https://api.openai.com/v1";
+        assert_eq!(sent, if mine { "sk-live" } else { "" }, "{endpoint}");
+        assert_eq!(v["keySentHere"], mine);
+    }
+    // A key needs an address to belong to; one over plain http to another computer is refused.
+    let mut app = new_app();
+    app.ui.ai.endpoint = "nonsense".into();
+    assert!(app.run("settings.ai", json!({"key": "sk"})).unwrap_err().contains("address"));
+    let (services, calls) = answering(chat_reply("OK"));
+    let mut app = SlideApp::new(Session::with_new(), services);
+    app.run("settings.ai", json!({"endpoint": "http://192.168.1.5/v1", "key": "sk"})).unwrap();
+    assert!(app.run("ai.test", json!({})).unwrap_err().contains("unencrypted"));
+    assert!(calls.borrow().is_empty(), "nothing was sent");
+}
+
+/// Cancel lets go of a request that hangs; its answer, if it ever comes, is dropped.
+#[test]
+fn a_hanging_request_can_be_cancelled() {
+    let mut h = harness(new_app());
+    let (tx, rx) = std::sync::mpsc::channel::<Result<serde_json::Value, String>>();
+    h.state_mut().ai.pending = Some((crate::ai::Job::Draft, rx));
+    h.state_mut().run("app.backstage", json!({"page": "settings", "tab": "ai"})).unwrap();
+    h.run_steps(3);
+    let before = h.state().session.active().unwrap().doc.slides.len();
+    h.get_by_role_and_label(Role::Button, "Cancel").click();
+    h.run_steps(3);
+    assert!(h.state().ai.pending.is_none());
+    let _ = tx.send(chat_reply("## Late\n- too late"));
+    h.run_steps(3);
+    assert_eq!(h.state().session.active().unwrap().doc.slides.len(), before, "a cancelled answer adds nothing");
+    assert_eq!(h.state_mut().run("ai.cancel", json!({})).unwrap()["cancelled"], false);
+}
+
+/// Slides go to the presentation they were asked for: if another one is open when they arrive,
+/// they aren't added anywhere.
+#[test]
+fn drafted_slides_never_land_in_another_presentation() {
+    let (tx, rx) = std::sync::mpsc::channel::<Result<serde_json::Value, String>>();
+    let rx = std::cell::RefCell::new(Some(rx));
+    let services = Services { ai_send: Some(Box::new(move |_| rx.borrow_mut().take().unwrap())), ..Default::default() };
+    let mut h = harness(SlideApp::new(Session::with_new(), services));
+    h.state_mut().run("ai.draftSlides", json!({"prompt": "Bees"})).unwrap();
+    h.state_mut().run("file.new", json!({})).unwrap();
+    let counts = |h: &Harness<'static, SlideApp>| h.state().session.documents().iter().map(|d| d.doc.slides.len()).collect::<Vec<_>>();
+    let before = counts(&h);
+    tx.send(chat_reply("## Bees\n- buzz")).unwrap();
+    h.run_steps(3);
+    assert_eq!(counts(&h), before);
+    assert!(h.state().ai.outcome.clone().unwrap().unwrap_err().contains("isn't the one open now"));
+}
+
+/// A model that runs away adds 50 slides at most, and says so.
+#[test]
+fn a_runaway_draft_adds_fifty_slides_at_most() {
+    let outline: String = (0..500).map(|i| format!("## Slide {i}\n- point\n")).collect();
+    let (services, _) = answering(chat_reply(&outline));
+    let mut h = harness(SlideApp::new(Session::with_new(), services));
+    let before = h.state().session.active().unwrap().doc.slides.len();
+    h.state_mut().run("ai.draftSlides", json!({"prompt": "Everything"})).unwrap();
+    h.run_steps(3);
+    assert_eq!(h.state().session.active().unwrap().doc.slides.len(), before + crate::ai::MAX_SLIDES);
+    let ok = h.state().ai.outcome.clone().unwrap().unwrap();
+    assert!(ok.contains("the first 50 of 500"), "{ok}");
 }
 
 /// Without a host that can send requests (the web build), AI says so instead of failing quietly.

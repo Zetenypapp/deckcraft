@@ -8,8 +8,27 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Insert › Icons is a Lucide stroke gallery; ribbon icons stay original drawings; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Size and Position dialog; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Comments pane lists every slide; Review Previous/Next; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (View › New Window opens a second window on the same presentation; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Photo Album dialog; 28 dialogs; breadth stays 79%, UI ~60%; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Edit Photo Album reuses the Photo Album dialog; 28 dialogs; breadth stays 79%, UI ~60%; previous: trivial, Photo Album dialog) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Colors; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Fonts; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Alt Text dialog's decorative checkbox follows the selection; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Hyperlink dialog follows the selection; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Insert › Date and Time dialog; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Zoom dialog: percent or Fit, applies on OK; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** trivial (command search skips Export without a path, #79; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; dialogs stay 27) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers placeholders; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Trim Media dialog follows the selection; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
-> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-14 · **Change:** minor (File › New starter decks; previous: minor, text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Sorter sections: add, rename, collapse, drag a whole section; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Colors; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Fonts; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Insert › Date and Time dialog; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; dialogs stay 27) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers placeholders; previous: text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft looks and feels next to PowerPoint: the shell, the ribbon, menus, panes, dialogs,
 direct manipulation, keyboard and precision. Observations of PowerPoint are kept locally in
@@ -29,7 +48,7 @@ AGENTS.md §2). Dimension score: **~60% ready** (estimated), **30–50 h** to pa
 | File tab (Backstage): Home, New, Open, Info, Save, Save As, Print, Share, Export, Close, Account, Options | yes | yes (#76), see [File tab](#file-tab-backstage); no Share (cloud) | Video/GIF/CD exports, templates beyond the built-in themes |
 | Start screen: new, themes, templates, recent, open | yes, the same page as File › Home | yes: File › Home with Home, New, Open, Account and Options (#76) | |
 | Status bar: slide counter, language, notes, comments, views, zoom slider | yes | yes | |
-| Command search (Tell Me) | yes | command palette | #79 default entry fails |
+| Command search (Tell Me) | yes | command palette | |
 | Light / dark appearance | follows the system | light or dark; doesn't follow the system (#41) | 1–2 h |
 | Settings page | File › Options, a dialog with sections and no search | File › Settings: General, Themes, New Presentations, Keyboard Shortcuts, Backup and Reset tabs, with a search box over them; the title bar's gear opens it (`app.backstage {page: settings, tab}`) | |
 | Interface size | follows the system's display scaling | Settings › General: 90–175% presets and 5% steps, 75–200% (`view.interfaceSize`) | |
@@ -41,8 +60,10 @@ AGENTS.md §2). Dimension score: **~60% ready** (estimated), **30–50 h** to pa
 | Custom keyboard shortcuts | no (fixed shortcuts) | File › Settings › Keyboard Shortcuts: own keys for any command and the slide-show actions, recorded from a key press, several per action, a warning before taking another action's key, reset per action or all (`keys.list`, `keys.set`, `keys.reset`, #127). Editor keys need Ctrl, Alt or a function key | |
 | Reset all settings | none (delete the registry key or the preference files) | File › Settings › Backup and Reset, confirmed in place (`app.resetSettings`); recent files stay | |
 | Interface themes and high contrast | Office Theme (Colorful, Dark Gray, Black, White) on File › Account; follows the system's high-contrast mode | File › Settings › Themes (also the title bar’s gear): Standard, High Contrast (WCAG AAA text, outlined controls), Lagoon, Sunset and Custom (own tint and accent, text kept readable), each light or dark, with previews (`view.uiTheme`); doesn't follow the system's high-contrast setting | 1–2 h |
-| One window per presentation, New Window, Arrange All | yes | tabs in one window; no New Window | 3–5 h |
+| One window per presentation, New Window, Arrange All | yes | New Window opens one more window on the same presentation (its own slide, live with edits); tabs stay in the first window; no Arrange All | Arrange All |
 | Quick Access Toolbar customization | yes | no | P1 partial |
+| One window per presentation, New Window, Arrange All | yes | tabs in one window; no New Window | 3–5 h |
+| Quick Access Toolbar customization | yes | yes: Customize menu (common commands, reset), right-click any ribbon button to add, right-click a toolbar button to remove; saved with the UI state | done |
 
 ## File tab (Backstage)
 
@@ -59,8 +80,8 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 
 | Page | PowerPoint | DeckCraft |
 |---|---|---|
-| Home | Prompt box (Copilot), New row of themes with More themes, Recent / Favorites / Shared with Me with a file search, More presentations | DeckCraft's mark, Blank Presentation and the first themes with More themes →, Recent with a file search and More presentations → (to Open). No Copilot prompt, Favorites or Shared with Me |
-| New | Blank Presentation, template search with suggested searches, gallery of online templates and themes | Blank Presentation, search box, the built-in themes and the sample deck (`file.new {theme}`). No online templates |
+| Home | Prompt box (Copilot), New row of themes with More themes, Recent / Favorites / Shared with Me with a file search, More presentations | DeckCraft's mark, Blank Presentation and the first themes with More themes →, the first starter decks with More templates →, Recent with a file search and More presentations → (to Open). No Copilot prompt, Favorites or Shared with Me |
+| New | Blank Presentation, template search with suggested searches, gallery of online templates and themes | Blank Presentation, search box, the built-in themes, six original starter decks (`file.new {template}`) and the sample deck (`file.new {theme}`). No online templates |
 | Open | Recent, Shared with Me, OneDrive, This PC, Add a Place, Browse; Presentations / Folders; Recover Unsaved Presentations | Recent and Browse (`app.openDialog`), recent presentations with a search box (`file.open`), Recover Unsaved Presentations (`file.recovery.open`). No cloud places or Folders tab |
 | Info | Name and path, Upload / Share / Copy path / Open file location; Protect, Inspect, Version History, Manage Presentation; Properties, Related Dates, Related People | Name and path, Copy path, Open file location; Inspect Presentation (Accessibility Checker), Manage Presentation (Revert); Size, Slides, Hidden slides and editable Title, Subject, Tags, Categories, Company, Comments, Author (`file.info`, `file.properties`). No Protect, Version History or dates |
 | Save | Saves; a presentation never saved goes to Save As | Same (`file.save`) |
@@ -79,11 +100,24 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill, gradient editor, line (dash, compound, cap, join, begin/end arrows and sizes), some effects, size (lock aspect ratio); no 3-D, thin picture/texture options |
 | Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill, gradient editor, line, shadow/glow/reflection details (colour, transparency, blur, angle, distance, size), soft edges, size; no 3-D, thin picture/texture options |
 | Format Background pane | yes | yes |
+| Slide Master | Insert Layout, Rename, Delete, Preserve, Insert Placeholder, Title and Footers | Insert Layout, Rename, Delete, Insert Placeholder, and Preserve, Title and Footers checkboxes (`master.preserve`, `master.placeholders`). A master thumbnail selects the master |
 | Selection Pane | front-most first, groups fold, drag to restack, Bring Forward / Send Backward arrows, Show All / Hide All, eye, padlock (Lock), rename in place | same: drag restacks among siblings (a child stays in its group), Ctrl+click toggles, Shift+click selects a run, arrows / Home / End / F2 / Esc in the list, right-click menu |
 | Animation Pane | list + advanced timeline | list, reorder, timing; no timeline |
 | Comments pane (threads) | yes | yes: every slide, with Previous and Next on the Review tab |
 | Design Ideas (Designer) | yes (cloud) | no |
 | Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Size and Position, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Photo Album, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Photo Album, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Photo Album, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Photo Album (Edit Photo Album reopens this dialog), Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages, Create New Theme Colors |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages, Create New Theme Fonts |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Replace Fonts, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 27 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text (decorative follows the selection), Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 27 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink (address, slide and ScreenTip follow the selection), Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Date and Time, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 27 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom (percent or Fit, applies on OK), Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
+| Design ▸ Effects | named theme effect schemes | DeckCraft, Soft, Crisp, Lift, Glow and Plain (`design.effects`); colours and fonts stay |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 27 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 27 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media (start, end and fades follow the selection), SmartArt chooser, Quit, Notes Pages |
 
 ## Direct manipulation
 
@@ -106,6 +140,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | WordArt transform | Transform gallery | Shape Format ▸ Text Effects ▸ Transform (`format.textWarp`): No Transform, Follow Path and the other 36 presets. No adjust handles |
 | Context menus on shapes, slides, text, thumbnails | yes | yes, shorter |
 | Drag and drop of files and between thumbnails | yes | yes |
+| Slide Sorter sections: a bar per section, add, rename in place, collapse, drag the whole section (its slides move with it) | yes | yes |
 | Image paste from the clipboard | yes | macOS yes; Windows and Linux no (#53) |
 | Font menu: every installed family with its faces | yes | families yes; only Regular/Bold/Italic faces (#69) |
 
@@ -159,10 +194,14 @@ on the slide as shapes. No pixel comparison against PowerPoint screenshots has b
 |---|---|
 | Native macOS menu bar from `menu_tree()`, filled out to PowerPoint's menu items | 3–5 |
 | Format Shape pane depth | 6–10 |
-| Missing dialogs (Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object) | 8–14 |
+| Missing dialogs (Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object; Create New Theme Colors is in) | 8–14 |
+| Missing dialogs (Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object; Create New Theme Fonts is in) | 8–14 |
+| Missing dialogs (Font, Bullets and Numbering, Find/Replace, Action Settings, Print, Insert Object) | 8–14 |
 | Window chrome, system appearance, palette fixes (#41, #71, #79) | 3–5 |
+| Missing dialogs (Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object) | 8–14 |
+| Window chrome and system appearance (#41, #71) | 3–5 |
 | Grid Options, edit points UI, crop depth | 4–7 |
-| Multiple windows | 3–5 |
+| Arrange All (New Window is one extra window) | 2–3 |
 | A screenshot comparison pass on the most-used tabs | 2–4 |
 | **Total** | **~30–52** |
 
@@ -180,6 +219,21 @@ on the slide as shapes. No pixel comparison against PowerPoint screenshots has b
 | 2026-10-14 | minor | Insert › Icons is a searchable gallery of Lucide stroke icons inserted as shapes. Ribbon chrome stays original drawings |
 | 2026-10-14 | minor | Size and Position dialog on Shape Format › Size and the shape context menu. Breadth stays 79%; UI ready stays ~60% |
 | 2026-10-14 | trivial | Comments pane lists every slide; Review ▸ Previous and Next walk the deck |
+| 2026-10-13 | minor | View › New Window: a second window on the same presentation, with its own slide; Arrange All is still missing |
+| 2026-10-14 | minor | File › Home and New show six original starter decks; online templates are still absent |
+| 2026-10-14 | minor | Slide Sorter draws a bar per section: Add Section, rename in place, collapse, and drag the bar to move the section and its slides |
+| 2026-10-14 | trivial | Photo Album dialog (28 dialogs). Breadth stays 79%, UI ~60% |
+| 2026-10-14 | trivial | Edit Photo Album reuses the Photo Album dialog (28 dialogs). Breadth stays 79%, UI ~60% |
+| 2026-10-14 | minor | Design › Colors › Customize Colors… opens Create New Theme Colors (the open master's twelve theme colours; dialogs 27 → 28) |
+| 2026-10-14 | minor | Design › Fonts › Customize Fonts… opens Create New Theme Fonts (heading and body latin on the open master; dialogs 27 → 28) |
+| 2026-10-14 | trivial | Alt Text dialog: Mark as decorative follows the selection |
+| 2026-10-14 | trivial | Hyperlink dialog: address, email, slide and ScreenTip follow the selection |
+| 2026-10-14 | minor | Insert › Date and Time: format list, language, Update automatically. 28 dialogs. Languages are the ones the date field can compute (English, plus numeric dates for en-GB, fr-FR, ja-JP, sv-SE) |
+| 2026-10-14 | trivial | Zoom dialog: percent or Fit, applied on OK. View ▸ Zoom opens it; the arrow keeps the presets |
+| 2026-10-13 | trivial | Command search no longer offers an Export command that fails without a path (#79) |
+| 2026-10-14 | minor | Design ▸ Effects applies a named effect scheme (fills, lines and effects). Not a new dialog; dialogs stay 27 |
+| 2026-10-14 | minor | Slide Master: Preserve, and Title and Footers placeholders, on the open master or layout |
+| 2026-10-14 | trivial | Trim Media dialog: start, end and fades follow the selected clip |
 | 2026-10-12 | minor | File tab (Backstage) observed in PowerPoint for Windows and matched (#76); the start screen is File › Home |
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |

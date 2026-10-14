@@ -18,6 +18,17 @@ pub const EXTENSION: &str = "deckcraft";
 pub const VERSION: u32 = 1;
 /// Largest entry we will inflate (guards against zip bombs).
 const MAX_ENTRY: u64 = 2 << 30;
+/// All embedded media together, inflated (#393).
+const MAX_TOTAL_MEDIA: u64 = 4 << 30;
+/// Media items one file may list.
+const MAX_MEDIA_ITEMS: usize = 100_000;
+
+/// What one load may inflate.
+#[derive(Clone, Copy)]
+struct Budget {
+    total: u64,
+    items: usize,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum FormatError {
@@ -87,12 +98,22 @@ pub fn sniff(bytes: &[u8]) -> bool {
 }
 
 fn read_entry(z: &mut zip::ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<Vec<u8>> {
+    read_entry_max(z, name, MAX_ENTRY)
+}
+
+/// Read one member, refusing it before inflating if it declares more than `max` bytes, and
+/// stopping at `max` if it inflates further than it declared.
+fn read_entry_max(z: &mut zip::ZipArchive<Cursor<&[u8]>>, name: &str, max: u64) -> Result<Vec<u8>> {
     let f = z.by_name(name).map_err(|e| FormatError::Damaged(format!("{name}: {e}")))?;
-    if f.size() > MAX_ENTRY {
+    if f.size() > max {
         return Err(FormatError::Damaged(format!("{name} is too large")));
     }
     let mut out = Vec::with_capacity(f.size().min(64 << 20) as usize);
-    f.take(MAX_ENTRY).read_to_end(&mut out).map_err(|e| FormatError::Damaged(format!("{name}: {e}")))?;
+    let mut f = f.take(max.saturating_add(1));
+    f.read_to_end(&mut out).map_err(|e| FormatError::Damaged(format!("{name}: {e}")))?;
+    if out.len() as u64 > max {
+        return Err(FormatError::Damaged(format!("{name} is too large")));
+    }
     Ok(out)
 }
 
@@ -105,6 +126,10 @@ pub fn load(bytes: &[u8]) -> Result<Presentation> {
 /// Read a presentation and list the embedded media that couldn't be read (missing, too large
 /// or failing its CRC), one message each. Linked media saved without its bytes isn't damage.
 pub fn load_checked(bytes: &[u8]) -> Result<(Presentation, Vec<String>)> {
+    load_within(bytes, Budget { total: MAX_TOTAL_MEDIA, items: MAX_MEDIA_ITEMS })
+}
+
+fn load_within(bytes: &[u8], budget: Budget) -> Result<(Presentation, Vec<String>)> {
     let mut z = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| FormatError::NotOurs(e.to_string()))?;
     let json = read_entry(&mut z, "presentation.json").map_err(|_| FormatError::NotOurs("no presentation.json".into()))?;
     let m: Manifest = serde_json::from_slice(&json).map_err(|e| FormatError::Damaged(e.to_string()))?;
@@ -113,11 +138,25 @@ pub fn load_checked(bytes: &[u8]) -> Result<(Presentation, Vec<String>)> {
     }
     let mut p = m.presentation;
     let mut damaged = vec![];
+    if p.media.len() > budget.items {
+        return Err(FormatError::Damaged(format!("{} media items (at most {})", p.media.len(), budget.items)));
+    }
+    // A repeated id names the same member: keep the first item, so the member is inflated once
+    // and the deck can be saved again (a zip can't hold two `media/<id>`).
+    let mut seen = std::collections::HashSet::new();
+    p.media.retain(|m| seen.insert(m.id));
+    let mut left = budget.total;
     for item in &mut p.media {
         let name = format!("media/{}", item.id.0);
         let linked_only = item.link.is_some() && z.index_for_name(&name).is_none();
-        match read_entry(&mut z, &name) {
-            Ok(data) => item.data = Arc::new(data),
+        if z.by_name(&name).is_ok_and(|f| f.size() > left) {
+            return Err(FormatError::Damaged("embedded media is larger than DeckCraft can open".into()));
+        }
+        match read_entry_max(&mut z, &name, left.min(MAX_ENTRY)) {
+            Ok(data) => {
+                left -= data.len() as u64;
+                item.data = Arc::new(data);
+            }
             Err(_) if linked_only => {}
             Err(e) => damaged.push(e.to_string()),
         }
@@ -152,11 +191,24 @@ pub fn repair(p: &mut Presentation) {
             }
         }
     }
-    if !(p.slide_size.width.is_finite() && p.slide_size.width >= 1.0 && p.slide_size.height.is_finite() && p.slide_size.height >= 1.0) {
-        p.slide_size = defaults::WIDE;
+    p.slide_size = sane_slide_size(p.slide_size);
+    // The notes page only lays out notes, but its size divides too.
+    if !(p.notes_size.width.is_finite() && p.notes_size.width > 0.0 && p.notes_size.height.is_finite() && p.notes_size.height > 0.0) {
+        p.notes_size = Presentation::default().notes_size;
     }
-    p.slide_size.width = p.slide_size.width.min(4000.0);
-    p.slide_size.height = p.slide_size.height.min(4000.0);
+}
+
+/// Smallest and largest slide side, in points: PowerPoint's 1–56 in, as Design › Slide Size allows.
+pub const SLIDE_SIDE: std::ops::RangeInclusive<f64> = 72.0..=4032.0;
+
+/// A slide size the views and renderer can always lay out: a missing, zero, negative or
+/// non-finite side gives the 16:9 default, and each side is brought into [`SLIDE_SIDE`].
+pub fn sane_slide_size(s: deckcraft_model::Size) -> deckcraft_model::Size {
+    let ok = |v: f64| v.is_finite() && v > 0.0;
+    if !(ok(s.width) && ok(s.height)) {
+        return defaults::WIDE;
+    }
+    deckcraft_model::Size::new(s.width.clamp(*SLIDE_SIDE.start(), *SLIDE_SIDE.end()), s.height.clamp(*SLIDE_SIDE.start(), *SLIDE_SIDE.end()))
 }
 
 /// Slides read from an outline: each title with its body paragraphs (level 0–8, text).
@@ -330,6 +382,51 @@ mod tests {
     }
 
     #[test]
+    fn media_budget_is_cumulative() {
+        let mut p = Presentation::default();
+        p.add_media("a.bin", "application/octet-stream", vec![1; 600]);
+        p.add_media("b.bin", "application/octet-stream", vec![2; 600]);
+        let bytes = save(&p).unwrap();
+        // Exactly at the limit opens; one byte under is refused, though each item fits.
+        assert!(load_within(&bytes, Budget { total: 1200, items: 2 }).is_ok());
+        assert!(load_within(&bytes, Budget { total: 1199, items: 2 }).is_err());
+        assert!(load_within(&bytes, Budget { total: 1200, items: 1 }).is_err());
+    }
+
+    #[test]
+    fn repeated_media_ids_are_read_once() {
+        use std::io::Write;
+        let mut p = Presentation::default();
+        p.add_media("a.bin", "application/octet-stream", vec![7; 1000]);
+        let good = save(&p).unwrap();
+        // The same file with its media item listed 51 times.
+        let mut z = zip::ZipArchive::new(Cursor::new(good.as_slice())).unwrap();
+        let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for i in 0..z.len() {
+            let mut f = z.by_index(i).unwrap();
+            if f.name() == "presentation.json" {
+                let mut json = vec![];
+                f.read_to_end(&mut json).unwrap();
+                let mut v: serde_json::Value = serde_json::from_slice(&json).unwrap();
+                let media = &mut v["presentation"]["media"];
+                let one = media[0].clone();
+                *media = serde_json::Value::Array(vec![one; 51]);
+                out.start_file("presentation.json", zip::write::SimpleFileOptions::default()).unwrap();
+                out.write_all(&serde_json::to_vec(&v).unwrap()).unwrap();
+            } else {
+                out.raw_copy_file(f).unwrap();
+            }
+        }
+        let bytes = out.finish().unwrap().into_inner();
+        // 51 references to one 1000-byte member fit a 1000-byte budget: it's inflated once.
+        let q = load_within(&bytes, Budget { total: 1000, items: 51 }).unwrap().0;
+        assert_eq!(q.media.len(), 1);
+        assert_eq!(q.media[0].data.len(), 1000);
+        // And the deck saves again.
+        assert!(save(&q).is_ok());
+    }
+
+    #[test]
     fn roundtrip_with_media() {
         let mut p = Presentation::default();
         let id = p.add_media("a.png", "image/png", vec![1, 2, 3, 4]);
@@ -350,6 +447,59 @@ mod tests {
         let n = b.len();
         b.truncate(n / 2);
         assert!(load(&b).is_err());
+    }
+
+    #[test]
+    fn degenerate_slide_sizes_are_repaired() {
+        use deckcraft_model::Size;
+        let cases = [
+            ((0.0, 0.0), (960.0, 540.0)),
+            ((-5.0, 540.0), (960.0, 540.0)),
+            ((f64::NAN, 540.0), (960.0, 540.0)),
+            ((f64::INFINITY, 1.0), (960.0, 540.0)),
+            ((1.0, 1.0), (72.0, 72.0)),
+            ((0.5, 4000.0), (72.0, 4000.0)),
+            ((1e9, 20.0), (4032.0, 72.0)),
+            ((720.0, 540.0), (720.0, 540.0)),
+        ];
+        for ((w, h), want) in cases {
+            let mut p = Presentation { slide_size: Size::new(w, h), notes_size: Size::new(0.0, f64::NAN), ..Default::default() };
+            repair(&mut p);
+            assert_eq!((p.slide_size.width, p.slide_size.height), want, "{w}x{h}");
+            assert_eq!(p.notes_size, Presentation::default().notes_size);
+        }
+    }
+
+    /// A file whose slide size is null, a string or missing a side (written by hand or by
+    /// another tool; NaN is also saved as null) opens with the default size rather than failing
+    /// as damaged.
+    #[test]
+    fn files_with_unreadable_slide_sizes_still_open() {
+        let saved = save(&Presentation::default()).unwrap();
+        let mut z = zip::ZipArchive::new(Cursor::new(&saved[..])).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&read_entry(&mut z, "presentation.json").unwrap()).unwrap();
+        for size in [
+            serde_json::json!({"width": null, "height": 540}),
+            serde_json::json!({"width": "big", "height": 540}),
+            serde_json::json!({"height": 0}),
+            serde_json::json!(null),
+            serde_json::json!(7),
+        ] {
+            let mut m = json.clone();
+            m["presentation"]["slideSize"] = size.clone();
+            let mut buf = Cursor::new(Vec::new());
+            {
+                let mut w = zip::ZipWriter::new(&mut buf);
+                let o = zip::write::SimpleFileOptions::default();
+                w.start_file("mimetype", o).unwrap();
+                w.write_all(MIMETYPE.as_bytes()).unwrap();
+                w.start_file("presentation.json", o).unwrap();
+                w.write_all(&serde_json::to_vec(&m).unwrap()).unwrap();
+                w.finish().unwrap();
+            }
+            let p = load(buf.get_ref()).unwrap_or_else(|e| panic!("{size}: {e}"));
+            assert_eq!((p.slide_size.width, p.slide_size.height), (960.0, 540.0), "{size}");
+        }
     }
 
     #[test]

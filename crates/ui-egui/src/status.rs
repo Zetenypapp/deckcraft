@@ -42,7 +42,7 @@ pub fn status_bar(app: &mut SlideApp, ui: &mut Ui) {
         let pct = (app.ui.zoom.unwrap_or(app.canvas_scale) * 100.0).round();
         let lbl = right.add(egui::Label::new(egui::RichText::new(format!("{pct}%")).size(12.0).color(t.text_dim)).sense(Sense::click()));
         if lbl.clicked() {
-            app.dialog = Some(crate::dialogs::Dialog::new("zoom"));
+            let _ = app.run("view.zoomDialog", json!({}));
         }
         if small_icon(&mut right, Icon::ZoomIn, "Zoom In", false).clicked() {
             let _ = app.run("view.zoomIn", json!({}));
@@ -145,15 +145,22 @@ pub fn notes_pane(app: &mut SlideApp, ui: &mut Ui) {
                 app.notes_buf.2 = current.clone();
             }
             let mut buf = app.notes_buf.2.clone();
-            let r = ui.add(
-                egui::TextEdit::multiline(&mut buf)
-                    .id(id)
-                    .hint_text("Click to add notes")
-                    .frame(egui::Frame::NONE)
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(2)
-                    .font(theme::font(13.0)),
-            );
+            // Long notes scroll inside the pane instead of spilling over the slide (#221).
+            let r = egui::ScrollArea::vertical()
+                .max_height(ui.available_height())
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut buf)
+                            .id(id)
+                            .hint_text("Click to add notes")
+                            .frame(egui::Frame::NONE)
+                            .desired_width(f32::INFINITY)
+                            .desired_rows(2)
+                            .font(theme::font(13.0)),
+                    )
+                })
+                .inner;
             app.notes_buf.2 = buf.clone();
             if r.lost_focus() && buf != current {
                 let _ = app.run("slide.notes", json!({"text": buf, "index": idx}));

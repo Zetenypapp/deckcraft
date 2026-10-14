@@ -75,6 +75,30 @@ pub fn place_slide(pres: &Presentation, index: usize) -> Placed {
     out
 }
 
+/// The header, date, footer and page-number text of a notes or handout `master`, laid out in its
+/// placeholders (master points) with their own formatting and wrapping, for page `n`. The page
+/// number placeholder shows `n` in its first run's formatting.
+pub fn place_master_texts(pres: &Presentation, master: &deckcraft_model::Master, n: usize) -> Vec<PlacedText> {
+    use deckcraft_model::PhType;
+    let mut out = Placed::default();
+    let ctx = Ctx::for_master(pres, master);
+    let fields = SlideFields::new(u32::try_from(n).unwrap_or(u32::MAX), pres.header_footer.footer_text.clone(), &crate::RenderOpts::default());
+    for s in master.shapes.iter().filter(|s| matches!(s.ph_type(), Some(PhType::Header | PhType::Date | PhType::Footer | PhType::SlideNum))) {
+        let mut s = s.clone();
+        if s.ph_type() == Some(PhType::SlideNum) {
+            let mut body = s.text.clone().unwrap_or_default();
+            let props =
+                body.paragraphs.first().and_then(|p| p.runs.first().map(|r| r.props.clone()).or(Some(p.end_props.clone()))).unwrap_or_default();
+            let mut para = body.paragraphs.first().cloned().unwrap_or_default();
+            para.runs = vec![deckcraft_model::text::Run::with(n.to_string(), props)];
+            body.paragraphs = vec![para];
+            s.text = Some(body);
+        }
+        place(&mut out, &ctx, &fields, &s, Affine::IDENTITY, 0, None, false);
+    }
+    out.texts
+}
+
 /// `group` is the index in `out.shapes` of the enclosing group; `own` is true for the slide's own
 /// shapes (recorded in `out.shapes`), false for the layout's and master's.
 #[allow(clippy::too_many_arguments)]
@@ -153,4 +177,33 @@ fn run_link(body: &TextBody, para: usize, at: usize) -> Option<Hyperlink> {
         pos += n;
     }
     None
+}
+
+/// The outlines of shape `s`'s text as drawn, in the space `m` maps shape-local points to, and
+/// the colour of its first visible run: what Merge Shapes turns letters into. Empty when the
+/// shape has no text.
+pub fn text_outline(rctx: &Ctx, s: &Shape, m: Affine) -> (kurbo::BezPath, Option<deckcraft_color::Rgba>) {
+    let mut out = kurbo::BezPath::new();
+    let Some(body) = s.text.as_ref().filter(|b| !b.is_empty()) else { return (out, None) };
+    let x = resolve::xfrm(rctx, s);
+    let tr = shape_geometry(s, x.w, x.h).text_rect;
+    let layout = deckcraft_text::layout(rctx, s, body, &Opts { rect: tr, fields: &deckcraft_text::NoFields, prompt_color: None, no_shrink: false });
+    let m = crate::text_transform(m, tr, layout.rotation);
+    let mut first = None;
+    for run in &layout.runs {
+        let k = run.size / run.face.upem.max(1.0);
+        let skew = if run.fake_italic { Affine::new([1.0, 0.0, -0.2, 1.0, 0.0, 0.0]) } else { Affine::IDENTITY };
+        for (gid, gx, gy) in &run.glyphs {
+            let path = crate::glyph(&run.face, *gid);
+            if path.elements().is_empty() {
+                continue;
+            }
+            if first.is_none() && run.color.a > 0 {
+                first = Some(run.color);
+            }
+            let at = m * crate::glyph_place(run, *gid, *gx, *gy) * skew * Affine::scale(k);
+            out.extend(path.elements().iter().map(|e| at * *e));
+        }
+    }
+    (out, first)
 }

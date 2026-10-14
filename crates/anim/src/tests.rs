@@ -703,6 +703,37 @@ fn show_custom_show_and_range() {
 }
 
 #[test]
+fn playing_a_custom_show_stays_on_its_slides() {
+    use deckcraft_model::text::Action;
+    let mut p = pres(5);
+    p.custom_shows = vec![CustomShow { name: "Ends".into(), slides: vec![SlideId(1000), SlideId(1004)] }];
+    assert!(p.show.custom_show.is_none());
+    let mut s = ShowState::play_custom(&p, "Ends").expect("the show exists");
+    assert_eq!(s.custom_name(), Some("Ends"));
+    assert_eq!(s.slide, 0);
+    assert_eq!(s.peek_next(&p), Some(4));
+    assert_eq!(s.next(&p), ShowAction::Slide(4));
+    assert_eq!(s.next(&p), ShowAction::End);
+    assert_eq!(s.prev(&p), ShowAction::Slide(4));
+    assert_eq!(s.prev(&p), ShowAction::Slide(0));
+    assert!(ShowState::play_custom(&p, "Missing").is_none());
+    assert!(p.show.custom_show.is_none(), "one-shot playback does not change Set Up");
+
+    Arc::make_mut(&mut p.slides[4]).hidden = true;
+    let only = ShowState::play_custom(&p, "Ends").expect("the visible slide remains");
+    assert_eq!(only.first_index(&p), Some(0));
+    assert_eq!(only.last_index(&p), Some(0));
+
+    let mut s = ShowState::new(&p);
+    p.slides[4] = Arc::new(Slide { id: SlideId(1004), ..Default::default() });
+    assert_eq!(s.follow(&p, &Action::CustomShow { name: "Ends".into(), returns: true }, None), LinkJump::Show(ShowAction::Slide(0)));
+    assert_eq!(s.custom_name(), Some("Ends"));
+    assert_eq!(s.next(&p), ShowAction::Slide(4));
+    assert_eq!(s.follow(&p, &Action::CustomShow { name: "Missing".into(), returns: true }, None), LinkJump::None);
+    assert_eq!(s.slide, 4, "an unknown custom show leaves the current slide");
+}
+
+#[test]
 fn show_steps_through_builds() {
     let mut p = pres(2);
     Arc::make_mut(&mut p.slides[0]).shapes = vec![shape(1, "A")];
@@ -892,4 +923,21 @@ fn same_text_morphs_even_by_objects() {
     // Different texts still cross-fade with the Objects option.
     b.shapes = vec![titled(2, 40.0, 44.0, "Other")];
     assert!(morph_frame(&p, &a, &b, 0.5, &|_| false).text.is_empty());
+}
+
+#[test]
+fn media_in_the_click_sequence_cues_and_does_not_hold_the_click() {
+    // #116: a video set to play in the click sequence starts with its step, and the step doesn't
+    // last as long as the video (the next click goes on while it plays).
+    let play = Animation { duration_ms: 5000, ..anim(1, AnimClass::Media, "play", AnimStart::OnClick) };
+    let tl = Timeline::new(&slide_with(vec![play.clone(), anim(2, AnimClass::Exit, "fadeOut", AnimStart::OnClick)]), W, H);
+    assert_eq!(tl.steps(), 2);
+    assert_eq!(tl.step_duration(0), 0.0);
+    let cues = tl.media_cues(0, f64::NEG_INFINITY, 0.0);
+    assert_eq!(cues.iter().map(|e| (e.shape, e.anim)).collect::<Vec<_>>(), [(ShapeId(1), 0)]);
+    assert!(tl.media_cues(0, 0.0, f64::INFINITY).is_empty(), "set off once");
+    assert!(tl.media_cues(1, f64::NEG_INFINITY, f64::INFINITY).is_empty(), "only media effects");
+    // An After Previous effect still waits for the video.
+    let tl = Timeline::new(&slide_with(vec![play, anim(2, AnimClass::Entrance, "fade", AnimStart::AfterPrevious)]), W, H);
+    assert!((tl.step_duration(0) - 6.0).abs() < 1e-9, "{}", tl.step_duration(0));
 }

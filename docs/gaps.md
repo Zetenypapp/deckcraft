@@ -12,6 +12,19 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (chart trendlines round-trip; previous: minor, 3-D bevel, camera and face lighting rendered; IME composition and CJK interface text landed, #101; core-workflow alpha gate added; stage stays alpha; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Insert › Icons places a Lucide stroke set; 3-D models and stock content remain; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Size and Position dialog; previous: minor, 3-D bevel, camera and face lighting) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (six original starter decks on File › New; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (IME composition in a table cell is underlined; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Photo Album is one of 28 dialogs; Font, Bullets, Find, Replace Fonts, Action Settings, Print and Insert Object remain; previous: minor, 3-D bevel, camera and face lighting) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Edit Photo Album reuses the Photo Album dialog, still 28; Font, Bullets, Find, Replace Fonts, Action Settings, Print and Insert Object remain; previous: trivial, Photo Album counted) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Colors; dialogs 27 → 28; previous: 3-D bevel, camera and face lighting) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Fonts; dialogs 27 → 28; previous: 3-D bevel, camera and face lighting) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Date and Time dialog; 28 dialogs; previous: 3-D bevel, camera and face lighting) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus for more deck kinds; handout-master text kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (laser pointer in the slide show; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** trivial (command palette no longer offers Export without a path, #79; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; checklist row stays P so breadth stays 79%; previous: 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers placeholders; checklist letters unchanged, breadth stays 79%, dialogs stay 27; previous: 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (chart trendlines are drawn; previous: minor, chart trendlines round-trip; 3-D bevel, camera and face lighting rendered; IME composition and CJK interface text landed, #101; core-workflow alpha gate added; stage stays alpha; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -39,7 +52,7 @@ revision history.
 | 7 | Fonts: only Regular, Bold and Italic faces (#69) | Feature | B | 3–5 | [ui-parity.md](ui-parity.md) |
 | 8 | Image paste fails on Windows and Linux (#53) | Feature | B | 2–4 | [ui-parity.md](ui-parity.md) |
 | 9 | Presenter view isn't placed on the second display | Hardware | B | 3–5 | [slideshow-parity.md](slideshow-parity.md) |
-| 10 | Animation Pane: no timeline, thin preview; 64 of ~190 effects | Feature | B (pane) | 10–16 | [animation-parity.md](animation-parity.md) |
+| 10 | Animation Pane: thin preview (timeline done); 64 of ~190 effects | Feature | B (pane) | 8–14 | [animation-parity.md](animation-parity.md) |
 | 11 | Charts: data grid editing, elements, `chartex` types | Feature | B (data, elements) | 12–20 | [parity-checklist.md](parity-checklist.md) |
 | 12 | Format Shape pane thinner than PowerPoint's | UI/UX | B | 6–10 | [ui-parity.md](ui-parity.md) |
 | 13 | No native macOS menu bar | UI/UX | B | 3–5 | [ui-parity.md](ui-parity.md) |
@@ -120,6 +133,10 @@ Detail in [file-format-parity.md](file-format-parity.md).
   exist to compare against. `corpus_charts.rs` round-trips one owned slice (a combo chart with
   data labels and trendlines, a merged table with diagonal borders, text columns, autofit,
   vertical text and a WordArt warp). That is still a generated deck, not a corpus of real ones.
+- **Evidence:** `crates/pptx/tests/corpus_kinds.rs` builds decks in this repo and checks open → save →
+  reopen (package parts and text): tables, charts, animations, media, sections, and several masters
+  and layouts. A handout master with a header, footer, date and slide number used to disappear on
+  save; that text is kept now. There is still no larger corpus and no reference render from PowerPoint.
 - **Impact:** the main reason to switch is "open my PowerPoint decks". Fidelity on real decks
   (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is still mostly unknown.
 - **Estimate:** 20–35 h: grow the owned corpus in `storytold/photocraft-corpus` style (craftrules
@@ -136,8 +153,8 @@ Detail in [file-format-parity.md](file-format-parity.md).
 ### SVG pictures don't render
 - **Evidence:** `crates/render/src/images.rs` decodes through `image` 0.25 (PNG, JPEG, WebP, GIF,
   TIFF, BMP), and EMF/WMF through `deckcraft-metafile` (ported from WordCraft: paths, fills, pens,
-  pattern and hatch brushes, bitmaps and text; rectangle clip regions are applied, EMF+ records are
-  not drawn).
+  pattern and hatch brushes, bitmaps and text; rectangle clip regions are applied, EMF+ only
+  pictures play their EMF+ records).
   Nothing reads SVG; PowerPoint's Insert Icons stores SVG with a PNG fallback.
 - **Impact:** SVG icons show only their raster fallback, and SVG files can't be inserted.
 - **Estimate:** 4–8 h (an SVG renderer through `resvg`-style crates).
@@ -203,18 +220,36 @@ Detail in [file-format-parity.md](file-format-parity.md).
 
 ### Charts: data grid, elements and the newer chart types
 - **Evidence:** checklist rows "Edit chart data" (P0, partial), "Chart elements" (partial), "Other
-  chart types" (partial); `chartex` parts (waterfall, funnel, treemap, sunburst, histogram, box &
-  whisker) aren't read. Trendlines round-trip (`corpus_charts.rs`) and are not drawn. A combo
-  chart's secondary value axis is read (`y2_*`, `Series.secondary_axis`) and is not written back
-  when the chart is rebuilt.
+  chart types" (partial); `chartex` parts (waterfall, funnel, treemap, sunburst, histogram, Pareto,
+  box & whisker) are read, drawn, inserted, edited and saved as `chartEx` (kept unchanged, else
+  written from the model, with a plain chart fallback). Waterfalls float and total, funnels,
+  treemaps (squarified, nested by level with group banners) and sunbursts (one ring per level)
+  have their own layouts, histograms and Paretos bin their data (count, width or Scott's rule),
+  and box & whisker charts use exclusive or inclusive quartiles with 1.5 IQR whiskers. Region maps are kept
+  (their cached geography too, also through edits) and drawn as value-coloured tiles with a
+  colour scale, since DeckCraft ships no map boundaries. Radar charts are drawn polar (filled
+  or lines), stock charts as high-low lines with close dashes or up/down bars and saved as
+  `c:stockChart`, and combo charts start as columns with a line. Trendlines round-trip
+  (`corpus_charts.rs`) and are drawn: linear, exponential, logarithmic, polynomial, power and
+  moving average, with forecast and the equation and R² label. A moving average is drawn with
+  neither label. A combo chart's secondary value axis is read (`y2_*`,
+  `Series.secondary_axis`) and is not written back when the chart is rebuilt.
 - **Impact:** most business decks have charts; editing their data is routine.
 - **Estimate:** 12–20 h. Data and elements are **beta blockers** (6–10 h).
 
-### SmartArt is pre-drawn shapes only
-- **Evidence:** `crates/pptx/src/read/shapes.rs` reads SmartArt's drawing part as a group; no text
-  pane, no layout switching, the diagram data isn't regenerated.
-- **Impact:** editing a SmartArt diagram from PowerPoint breaks it.
-- **Estimate:** 10–16 h.
+### SmartArt editing is shallow
+- **Evidence:** a SmartArt graphic keeps its outline (`Shape.diagram`) and has a Text Pane, Add
+  Shape, Promote, Demote, Remove and layout switching (`crates/engine/src/cmd/smartart.rs`). On
+  `.pptx` the outline is written as a real diagram (data, layout, quick style, colours and the
+  cached drawing; `crates/pptx/src/dgm.rs`), and PowerPoint diagrams read their outline from the
+  data model, so they get the Text Pane too. 15 layouts (bullet and block lists, five process, two cycle and
+  a radial, hierarchy, two pyramids, two matrices), four SmartArt Styles and Change Colors
+  (colourful or one accent). Still missing: DeckCraft's own layout definitions are simple (not yet
+  checked in PowerPoint itself); PowerPoint has ~200 layouts, picture layouts and 3-D styles; editing an
+  imported diagram's outline redraws it with DeckCraft's layout; a diagram with no cached drawing
+  isn't drawn.
+- **Impact:** a PowerPoint diagram edited in DeckCraft changes look.
+- **Estimate:** 6–10 h.
 
 ### Animation Pane, effect count and preview
 Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a **beta blocker**.
@@ -234,9 +269,14 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
 - **Estimate:** 4–8 h.
 
 ### Notes and Handout masters
-- **Evidence:** checklist row missing; PPTX writes a notes master but there's no view to edit it,
-  and no handout master at all.
-- **Estimate:** 4–6 h.
+- **Evidence:** View ▸ Handout Master and View ▸ Notes Master edit both masters (placeholders,
+  background, a slides-per-page preview for handouts) and PPTX keeps them. Notes pages (view and
+  PDF) place the slide and notes where the notes master does and print its header, date, footer
+  and page number in their own fonts, sizes and colours; PDF handouts print the handout master's.
+  Notes Master view previews the slide in its slide-image placeholder. PDF pages lay master text
+  out with the text engine (wrapping, mixed formatting), and the Notes Page view draws the same
+  layout. Left: the view draws it in the interface font (sizes, colours and weights kept).
+- **Estimate:** done for beta.
 
 ### Edit points, text warp, 3-D
 - **Evidence:** checklist rows "Edit points" (P1 missing), "Text warp transforms" (partial: all 40
@@ -274,6 +314,10 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
 ### Smaller missing rows
 Zoom (summary/section/slide, 6–10 h), reuse slides (2–4 h), laser pointer (1–2 h), transition
 sounds (1–2 h), artistic effects (6–10 h), compress pictures (2–3 h), insert screenshot (2–3 h), record audio/screen and record slide
+sounds (1–2 h), artistic effects (3–6 h for the other 15 of 22; 7 approximated and round-tripped), remove background (6–10 h; needs a model or a classical
+Zoom (summary/section/slide, 6–10 h), reuse slides (2–4 h), transition
+sounds (1–2 h), artistic effects (6–10 h), remove background (6–10 h; needs a model or a classical
+matte), compress pictures (2–3 h), insert screenshot (2–3 h), record audio/screen and record slide
 show (8–12 h), compare presentations (6–10 h), password protection (4–6 h, ECMA-376 agile
 encryption), ink to shape/text (6–10 h), 3-D models and stock content (6–10 h; Insert › Icons places a Lucide stroke set).
 
@@ -294,6 +338,22 @@ Detail in [ui-parity.md](ui-parity.md).
   Replace Fonts, Action Settings, Print, Insert Object…). 8–14 h.
 - **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Font, Bullets and Numbering, Find/Replace dialog,
   Replace Fonts, Action Settings, Print, Insert Object…). Size and Position is one of the 28. 8–14 h.
+- **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Photo Album is one of them). Still missing Font,
+- **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Photo Album is one of them; Edit Photo Album reopens it). Still missing Font,
+  Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object…. 8–14 h.
+- **Dialogs**: 28 dialogs vs PowerPoint's ~60. Create New Theme Colors (Design › Colors ›
+  Customize Colors…) edits the open master's twelve theme colours, not a saved library of named
+  schemes. Still missing: Font, Bullets and Numbering, Find/Replace dialog, Replace Fonts, Action
+  Settings, Print, Insert Object. 8–14 h.
+- **Dialogs**: 28 dialogs vs PowerPoint's ~60. Create New Theme Fonts (Design › Fonts ›
+  Customize Fonts…) edits the open master's heading and body latin faces and the scheme name.
+  It is not a saved library of theme fonts, and it does not pick East Asian or complex-script
+  faces. Still missing: Font, Bullets and Numbering, Find/Replace dialog, Replace Fonts, Action
+  Settings, Print, Insert Object. 8–14 h.
+- **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Font, Bullets and Numbering, Find/Replace dialog,
+  Action Settings, Print, Insert Object…). 8–14 h.
+- **Dialogs**: 30 dialogs vs PowerPoint's ~60 (Font, Find/Replace dialog, Replace Fonts, Print,
+  Insert Object…). Size and Position, Bullets and Numbering, Action Settings and Date and Time are in. 8–14 h.
 - **Command palette defaults to an Export entry that fails** (#79). 0.5 h.
 
 ## Hardware
@@ -319,7 +379,6 @@ Detail in [localization-parity.md](localization-parity.md).
   (Noto CJK is excluded by the asset policy), so the web build draws Korean file names, notes and
   outline text as boxes; desktop borrows Malgun Gothic, Apple SD Gothic Neo or Noto Sans CJK.
   Adding an openly licensed Korean face (e.g. Nanum Gothic, OFL) to craft-fonts: 1–2 h.
-- **Table cells don't underline an IME composition** (the text is composed in place, #101). 1 h.
 - **UI isn't mirrored for right-to-left languages.** 6–10 h.
 - **Browser build draws Arabic and Hebrew as missing-glyph boxes in exports** (#81). 1–2 h.
 
@@ -333,8 +392,11 @@ Detail in [localization-parity.md](localization-parity.md).
 
 ## Ecosystem
 
-- **8 original themes, no template gallery.** PowerPoint offers dozens of designs online and
-  offline. 8–14 h for a larger original set (asset policy: our own designs only).
+- **Six original starter decks; PowerPoint's large template gallery remains.** File › New and the
+  start screen offer Briefing, Lesson, Pitch, Field Notes, Quarterly and Evening Talk
+  (`file.new {template}`), each a few slides on one of our themes. Dozens of further offline
+  designs, and any online gallery, are still absent. 4–8 h for a larger original set (asset policy:
+  our own designs only).
 - **No add-ins or VBA.** Out of scope by policy; MCP/CLI automation is the alternative.
 
 ## AI features
@@ -358,12 +420,33 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-13 | minor | Benchmark suite (`cargo xtask bench`, `deckcraft-cli bench`): the performance gap is now frame rate and a PowerPoint comparison |
 | 2026-10-14 | minor | Owned corpus `corpus_media.rs`: 3-D model parts and animation bounce end now round-trip. The real-deck corpus and #70/#74/#77 stay open |
 | 2026-10-14 | trivial | Corpus slice: themes, masters, effects and links; text Mouse Over actions round-trip |
+| 2026-10-14 | trivial | A moving average trendline is drawn without an equation or an R² label |
+| 2026-10-14 | minor | Chart trendlines are drawn (six types, forecast, equation and R²). The charts gap stays open for the data grid, chartex and secondary-axis export; the real-deck corpus gap stays open |
 | 2026-10-14 | minor | Chart trendlines round-trip. The real-deck corpus gap stays open; secondary-axis export and drawing trendlines stay in the charts gap |
 | 2026-10-14 | trivial | 3-D contours |
 | 2026-10-14 | trivial | 3-D light rigs and materials; extrusion sides lit per side |
 | 2026-10-14 | trivial | 3-D extrusions draw their sides under turned cameras |
 | 2026-10-14 | minor | Insert › Icons places Lucide 1.56.0 stroke icons as custom shapes. The checklist row stays missing until 3-D models and stock content exist |
 | 2026-10-14 | minor | Size and Position dialog landed (position, size, rotation, scale, lock aspect, one undo). The dialog gap remains Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object and the rest of the ~60 |
+| 2026-10-14 | minor | File › New has six original starter decks; a large template gallery is still open |
+| 2026-10-14 | minor | An IME composition in a table cell is underlined in place, and the caret and candidate window sit in that cell |
+| 2026-10-14 | trivial | Photo Album dialog counted (28 vs ~60). Font, Bullets, Find, Replace Fonts, Action Settings, Print and Insert Object remain |
+| 2026-10-14 | trivial | Edit Photo Album reuses the Photo Album dialog (still 28 vs ~60). Font, Bullets, Find, Replace Fonts, Action Settings, Print and Insert Object remain |
+| 2026-10-14 | minor | Create New Theme Colors is in (dialogs 27 → 28). Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print and Insert Object stay open |
+| 2026-10-14 | minor | Create New Theme Fonts is in (dialogs 27 → 28): heading and body latin on the open master. Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print and Insert Object stay open |
+| 2026-10-14 | minor | Insert › Date and Time dialog. Dialog count 27 → 28; Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print and Insert Object are still missing |
+| 2026-10-13 | minor | Artistic effects: 7 of 22 (blur, pencil grayscale, line drawing, film grain, cutout, glow edges, photocopy) applied, removed and round-tripped (`a14:imgLayer`) |
+| 2026-10-14 | trivial | Notes Page view draws master text wrapped, as the PDF does |
+| 2026-10-14 | trivial | PDF master header/footer text wraps and keeps mixed formatting |
+| 2026-10-14 | trivial | Notes Master slide preview; master header/footer text keeps its formatting |
+| 2026-10-14 | minor | Notes pages and PDF handouts follow the notes and handout masters |
+| 2026-10-14 | minor | Notes Master view: the masters gap is now notes pages and PDF handouts following the masters |
+| 2026-10-14 | minor | Handout Master view: the masters gap is now the Notes Master view and handout text in PDF |
+| 2026-10-13 | minor | Owned PPTX corpus for tables, charts, animations, media, sections and masters. Handout-master text is kept; the corpus gap is now a larger set and PowerPoint reference renders |
+| 2026-10-13 | minor | Laser pointer in the slide show (checklist row Partial). Highlighter, eraser and a laser driven from presenter view remain |
+| 2026-10-13 | trivial | Command palette skips commands that need a value, so Export opens the dialog (#79) |
+| 2026-10-14 | minor | Design ▸ Effects applies a named effect scheme. The checklist row stays P, so breadth stays 79%. Dialogs stay 27 |
+| 2026-10-14 | minor | Slide Master Preserve and Title/Footers placeholders. Checklist letters unchanged (breadth stays 79%); dialogs stay 27 |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |

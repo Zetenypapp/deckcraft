@@ -1,6 +1,7 @@
 //! Dialogs (Insert Table, Slide Size, Header & Footer, Hyperlink, Set Up Show, Zoom, …) and the
 //! About window. The start screen is File › Home (`backstage.rs`).
 
+use deckcraft_color::SchemeSlot;
 use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::{Value, json};
 
@@ -48,7 +49,10 @@ fn title(id: &str) -> &'static str {
         "preferences" => "Preferences",
         "export" => "Export",
         "symbol" => "Symbol",
+        "photoAlbum" => "Photo Album",
+        "replaceFonts" => "Replace Font",
         "equation" => "Equation",
+        "dateTime" => "Date and Time",
         "spelling" => "Spelling",
         "pasteSpecial" => "Paste Special",
         "accessibility" => "Accessibility Checker",
@@ -58,7 +62,10 @@ fn title(id: &str) -> &'static str {
         "trim" => "Trim Media",
         "smartart" => "Choose a SmartArt Graphic",
         "bullets" => "Bullets and Numbering",
+        "action" => "Action Settings",
         "quit" => "DeckCraft",
+        "themeColors" => "Create New Theme Colors",
+        "themeFonts" => "Create New Theme Fonts",
         _ => "DeckCraft",
     }
 }
@@ -67,16 +74,32 @@ pub fn show(app: &mut SlideApp, ctx: &egui::Context) {
     let Some(mut d) = app.dialog.take() else { return };
     let mut open = true;
     let mut close = false;
-    egui::Window::new(title(&d.id))
+    let mut window = egui::Window::new(title(&d.id))
         .id(egui::Id::new(("dialog", d.id.clone())))
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, vec2(0.0, -40.0))
-        .open(&mut open)
-        .show(ctx, |ui| {
-            ui.set_min_width(340.0);
-            close = body(app, ui, &mut d);
+        .open(&mut open);
+    // Two columns of colour rows plus Save must fit the first frame (Theme Colors), as must Save
+    // in Theme Fonts. A later resize clips the buttons (the window size sticks) and clicks miss them.
+    if d.id == "themeColors" {
+        window = window.default_size(vec2(760.0, 420.0)).min_width(720.0).min_height(420.0);
+    } else if d.id == "themeFonts" {
+        window = window.default_size(vec2(460.0, 320.0)).min_width(420.0).min_height(300.0);
+    }
+    window.show(ctx, |ui| {
+        ui.set_min_width(match d.id.as_str() {
+            "themeColors" => 700.0,
+            "themeFonts" => 400.0,
+            _ => 340.0,
         });
+        if d.id == "themeColors" {
+            ui.set_min_height(360.0);
+        } else if d.id == "themeFonts" {
+            ui.set_min_height(280.0);
+        }
+        close = body(app, ui, &mut d);
+    });
     if open && !close && !ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         app.dialog = Some(d);
     }
@@ -109,6 +132,18 @@ fn field(ui: &mut Ui, d: &mut Dialog, label: &str, key: &str, default: &str) {
     d.fields.insert(key.into(), v);
 }
 
+/// "Mark as decorative" starts checked when every selected shape is already decorative.
+fn alt_text_starts_decorative(decorative: impl IntoIterator<Item = bool>) -> bool {
+    let mut any = false;
+    for on in decorative {
+        if !on {
+            return false;
+        }
+        any = true;
+    }
+    any
+}
+
 fn check(ui: &mut Ui, d: &mut Dialog, label: &str, key: &str, default: bool) -> bool {
     let mut v = d.get(key, if default { "1" } else { "0" }) == "1";
     ui.checkbox(&mut v, label);
@@ -118,6 +153,830 @@ fn check(ui: &mut Ui, d: &mut Dialog, label: &str, key: &str, default: bool) -> 
 
 fn num(d: &mut Dialog, key: &str, default: f64) -> f64 {
     d.get(key, "").trim().trim_end_matches(['"', '%', ' ']).parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(default)
+}
+
+fn album_items(d: &Dialog) -> Option<Vec<Value>> {
+    let raw = d.fields.get("items").map(String::as_str).unwrap_or("[]");
+    serde_json::from_str::<Value>(raw).ok().and_then(|v| v.as_array().cloned())
+}
+
+fn store_album_items(d: &mut Dialog, items: &[Value]) {
+    let raw = serde_json::to_string(items).unwrap_or_else(|_| "[]".into());
+    d.fields.insert("items".into(), raw);
+}
+
+fn album_item_label(v: &Value) -> String {
+    if let Some(text) = v.get("text").and_then(Value::as_str) {
+        let text = text.trim();
+        if text.is_empty() { "Text Box".to_string() } else { format!("Text: {text}") }
+    } else {
+        v.get("name").and_then(Value::as_str).filter(|s| !s.is_empty()).unwrap_or("Picture").to_string()
+    }
+}
+
+fn pick_album_picture(app: &mut SlideApp) -> Option<Value> {
+    let path = if let Some(pick) = app.services.pick_open.as_mut() {
+        pick("picture")
+    } else {
+        app.set_status("Pass pictures to insert.photoAlbum");
+        None
+    };
+    let path = path?;
+    let loaded = if let Some(read) = app.services.read.as_ref() {
+        match read(&path) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                app.set_status(e);
+                return None;
+            }
+        }
+    } else {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            match std::fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    app.set_status(format!("{path}: {e}"));
+                    return None;
+                }
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            app.set_status("The web build inserts album pictures from data passed to insert.photoAlbum");
+            return None;
+        }
+    };
+    if loaded.is_empty() {
+        app.set_status("That file is empty");
+        return None;
+    }
+    if loaded.len() > 32 * 1024 * 1024 {
+        app.set_status("That picture is larger than 32 MB");
+        return None;
+    }
+    let name = std::path::Path::new(&path).file_name().and_then(|n| n.to_str()).filter(|s| !s.is_empty()).unwrap_or("picture").to_string();
+    Some(json!({"name": name, "data": deckcraft_engine::cmd::base64_encode(&loaded)}))
+}
+
+fn album_choice(ui: &mut Ui, d: &mut Dialog, id: &str, key: &str, default: &str, choices: &[(&str, &str)]) {
+    let cur = d.get(key, default);
+    let label = choices.iter().find(|(k, _)| *k == cur).map(|(_, l)| *l).unwrap_or(default);
+    let opened = egui::ComboBox::from_id_salt(id).selected_text(label).width(220.0).show_ui(ui, |ui| {
+        for (k, l) in choices {
+            if ui.selectable_label(cur == *k, *l).clicked() {
+                d.fields.insert(key.into(), (*k).to_string());
+            }
+        }
+    });
+    opened.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, label));
+}
+
+const ALBUM_THEMES: &[&str] = &["DeckCraft", "Harbor", "Ember", "Meadow", "Nocturne", "Paper", "Coral Reef", "Slate"];
+
+fn current_theme(app: &SlideApp) -> String {
+    app.session
+        .active()
+        .and_then(|d| d.doc.masters.first())
+        .map(|m| m.theme.name.clone())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "DeckCraft".into())
+}
+
+fn album_json_id(v: &Value) -> Option<u64> {
+    v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+}
+
+/// Copy a command's dialog params into fields once. A fresh album has no `items`.
+fn seed_photo_album(app: &SlideApp, d: &mut Dialog) {
+    if d.fields.contains_key("seeded") {
+        return;
+    }
+    d.fields.insert("seeded".into(), "1".into());
+    let p = d.params.clone();
+    if let Some(items) = p.get("items").and_then(Value::as_array) {
+        store_album_items(d, items);
+        d.fields.insert("editing".into(), "1".into());
+    }
+    for key in ["layout", "frame", "theme"] {
+        if let Some(v) = p.get(key).and_then(Value::as_str).filter(|s| !s.is_empty()) {
+            d.fields.insert(key.into(), v.to_string());
+        }
+    }
+    for key in ["captions", "grayscale"] {
+        if let Some(v) = p.get(key).and_then(Value::as_bool) {
+            d.fields.insert(key.into(), if v { "1".into() } else { "0".into() });
+        }
+    }
+    if let Some(id) = p.get("album").and_then(album_json_id).filter(|n| *n != 0) {
+        d.fields.insert("album".into(), id.to_string());
+    }
+    let theme_was = d.fields.get("theme").cloned().filter(|s| !s.is_empty()).unwrap_or_else(|| current_theme(app));
+    if !d.fields.contains_key("theme") {
+        d.fields.insert("theme".into(), theme_was.clone());
+    }
+    d.fields.entry("themeWas".into()).or_insert(theme_was);
+}
+
+fn selected_album_picture(d: &Dialog, items: &[Value]) -> bool {
+    let i = d.fields.get("sel").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+    items.get(i).is_some_and(|item| item.get("data").is_some() || item.get("path").is_some())
+}
+
+fn with_selected_picture(d: &mut Dialog, f: impl FnOnce(&mut serde_json::Map<String, Value>)) {
+    let Some(mut list) = album_items(d) else { return };
+    let i = d.fields.get("sel").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+    let Some(item) = list.get_mut(i) else { return };
+    if item.get("data").is_none() && item.get("path").is_none() {
+        return;
+    }
+    let Some(obj) = item.as_object_mut() else { return };
+    f(obj);
+    store_album_items(d, &list);
+}
+
+/// Photo Album. Returns true when the dialog should close.
+fn photo_album_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
+    seed_photo_album(app, d);
+    ui.set_min_width(440.0);
+    egui::ScrollArea::vertical().max_height(520.0).id_salt("album_body").show(ui, |ui| {
+        ui.set_min_width(420.0);
+        ui.label("Pictures in album");
+        let items = album_items(d).unwrap_or_default();
+        let mut sel = d.get("sel", "0").parse::<usize>().unwrap_or(0);
+        // Fixed height so adding pictures does not push Create past the window.
+        egui::ScrollArea::vertical().max_height(120.0).min_scrolled_height(120.0).auto_shrink([false, false]).id_salt("album_list").show(ui, |ui| {
+            if items.is_empty() {
+                ui.label(egui::RichText::new("No pictures yet").color(Tokens::get(ui.ctx()).text_dim));
+            }
+            for (i, item) in items.iter().enumerate() {
+                if ui.selectable_label(sel == i, album_item_label(item)).clicked() {
+                    sel = i;
+                }
+            }
+        });
+        d.fields.insert("sel".into(), sel.to_string());
+        ui.horizontal(|ui| {
+            if ui.button("Add Pictures…").clicked()
+                && let Some(item) = pick_album_picture(app)
+            {
+                match album_items(d) {
+                    Some(mut list) if list.len() < 48 => {
+                        list.push(item);
+                        let next = list.len().saturating_sub(1);
+                        store_album_items(d, &list);
+                        d.fields.insert("sel".into(), next.to_string());
+                    }
+                    Some(_) => app.set_status("A photo album holds at most 48 pictures or text boxes"),
+                    None => app.set_status("The picture list is invalid"),
+                }
+            }
+            if ui.button("New Text Box").clicked() {
+                let text = d.get("boxText", "Text Box");
+                let text = text.trim();
+                if text.is_empty() {
+                    app.set_status("Type the text for the new text box");
+                } else if text.chars().count() > 400 {
+                    app.set_status("Text is longer than 400 characters");
+                } else if let Some(mut list) = album_items(d) {
+                    if list.len() >= 48 {
+                        app.set_status("A photo album holds at most 48 pictures or text boxes");
+                    } else {
+                        list.push(json!({"text": text}));
+                        let next = list.len().saturating_sub(1);
+                        store_album_items(d, &list);
+                        d.fields.insert("sel".into(), next.to_string());
+                    }
+                }
+            }
+            if ui.button("Remove").clicked()
+                && let Some(mut list) = album_items(d)
+                && let Some(i) = d.get("sel", "0").parse::<usize>().ok()
+                && i < list.len()
+            {
+                list.remove(i);
+                store_album_items(d, &list);
+                let next = i.min(list.len().saturating_sub(1));
+                d.fields.insert("sel".into(), next.to_string());
+            }
+        });
+        field(ui, d, "Text box:", "boxText", "Text Box");
+        let picture = selected_album_picture(d, &items);
+        ui.label(album_picture_status(&items, sel));
+        ui.horizontal_wrapped(|ui| {
+            ui.add_enabled_ui(picture, |ui| {
+                if ui.button("Rotate Left").clicked() {
+                    with_selected_picture(d, |obj| {
+                        let cur = obj.get("rot").and_then(Value::as_f64).unwrap_or(0.0);
+                        let next = ((cur - 90.0) % 360.0 + 360.0) % 360.0;
+                        obj.insert("rot".into(), json!(next));
+                    });
+                }
+                if ui.button("Rotate Right").clicked() {
+                    with_selected_picture(d, |obj| {
+                        let cur = obj.get("rot").and_then(Value::as_f64).unwrap_or(0.0);
+                        let next = ((cur + 90.0) % 360.0 + 360.0) % 360.0;
+                        obj.insert("rot".into(), json!(next));
+                    });
+                }
+                if ui.button("More Brightness").clicked() {
+                    nudge_picture(d, "brightness", 0.1);
+                }
+                if ui.button("Less Brightness").clicked() {
+                    nudge_picture(d, "brightness", -0.1);
+                }
+                if ui.button("More Contrast").clicked() {
+                    nudge_picture(d, "contrast", 0.1);
+                }
+                if ui.button("Less Contrast").clicked() {
+                    nudge_picture(d, "contrast", -0.1);
+                }
+            });
+        });
+        ui.add_space(4.0);
+        ui.label("Picture layout");
+        album_choice(
+            ui,
+            d,
+            "album_layout",
+            "layout",
+            "1",
+            &[
+                ("fit", "Fit to slide"),
+                ("1", "1 picture"),
+                ("2", "2 pictures"),
+                ("4", "4 pictures"),
+                ("1title", "1 picture with title"),
+                ("2title", "2 pictures with title"),
+                ("4title", "4 pictures with title"),
+            ],
+        );
+        ui.label("Frame shape");
+        album_choice(
+            ui,
+            d,
+            "album_frame",
+            "frame",
+            "rect",
+            &[("none", "None"), ("rect", "Rectangle"), ("rounded", "Rounded"), ("simple", "Simple, white")],
+        );
+        check(ui, d, "Captions under pictures", "captions", false);
+        check(ui, d, "ALL pictures black and white", "grayscale", false);
+        ui.label("Album theme");
+        album_choice(ui, d, "album_theme", "theme", "DeckCraft", &ALBUM_THEMES.iter().map(|n| (*n, *n)).collect::<Vec<_>>());
+    });
+    let captions = d.fields.get("captions").is_some_and(|v| v == "1");
+    let grayscale = d.fields.get("grayscale").is_some_and(|v| v == "1");
+    let editing = d.fields.get("editing").is_some_and(|v| v == "1");
+    let (ok, cancel) = buttons(ui, if editing { "Update" } else { "Create" });
+    if ok {
+        let Some(list) = album_items(d) else {
+            app.set_status("The picture list is invalid");
+            return false;
+        };
+        if list.is_empty() {
+            app.set_status("Add a picture or a text box first");
+            return false;
+        }
+        let layout = d.get("layout", "1");
+        let frame = d.get("frame", "rect");
+        let theme = d.get("theme", "DeckCraft");
+        let theme_was = d.fields.get("themeWas").cloned().unwrap_or_default();
+        let mut payload = json!({"pictures": list, "layout": layout, "frame": frame, "captions": captions, "grayscale": grayscale});
+        if theme != theme_was
+            && let Some(obj) = payload.as_object_mut()
+        {
+            obj.insert("theme".into(), json!(theme));
+        }
+        if editing {
+            if let Some(album) = d.fields.get("album").filter(|s| !s.is_empty() && s.as_str() != "0")
+                && let Ok(id) = album.parse::<u64>()
+                && let Some(obj) = payload.as_object_mut()
+            {
+                obj.insert("album".into(), json!(id));
+            }
+            return app.run("insert.photoAlbumEdit", payload).is_ok();
+        }
+        return app.run("insert.photoAlbum", payload).is_ok();
+    }
+    cancel
+}
+
+fn album_picture_status(items: &[Value], sel: usize) -> String {
+    let Some(item) = items.get(sel) else {
+        return "Select a picture to rotate it or change brightness and contrast".into();
+    };
+    if item.get("data").is_none() && item.get("path").is_none() {
+        return "Text boxes have no picture options".into();
+    }
+    let rot = item.get("rot").and_then(Value::as_f64).unwrap_or(0.0);
+    let brightness = item.get("brightness").and_then(Value::as_f64).unwrap_or(0.0);
+    let contrast = item.get("contrast").and_then(Value::as_f64).unwrap_or(0.0);
+    format!("Rotation {rot:.0}°, brightness {brightness:.1}, contrast {contrast:.1}")
+}
+
+fn nudge_picture(d: &mut Dialog, key: &str, delta: f64) {
+    with_selected_picture(d, |obj| {
+        let cur = obj.get(key).and_then(Value::as_f64).unwrap_or(0.0);
+        let next = (((cur + delta) * 10.0).round() / 10.0).clamp(-1.0, 1.0);
+        obj.insert(key.into(), json!(next));
+    });
+}
+
+fn seed_theme_colors(d: &mut Dialog) {
+    if d.fields.contains_key("seeded") {
+        return;
+    }
+    let name = d.params.get("name").and_then(Value::as_str).unwrap_or("Custom");
+    d.fields.insert("schemeName".into(), name.to_string());
+    let obj = d.params.get("colors").and_then(Value::as_object);
+    for slot in SchemeSlot::THEME {
+        let hex = obj.and_then(|o| o.get(slot.xml_name())).and_then(Value::as_str).unwrap_or("000000");
+        d.fields.insert(slot.xml_name().into(), hex.to_string());
+    }
+    d.fields.insert("seeded".into(), "1".into());
+}
+
+fn theme_color_row(ui: &mut Ui, d: &mut Dialog, slot: SchemeSlot) {
+    let key = slot.xml_name();
+    let mut v = d.get(key, "000000");
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(188.0, 18.0), egui::Label::new(slot.label()));
+        let fill = deckcraft_color::Rgba::from_hex(&v).map(theme::to_color32).unwrap_or_else(|| Color32::from_gray(200));
+        let (rect, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+        ui.painter().rect(rect, CornerRadius::same(2), fill, Stroke::new(1.0, Tokens::get(ui.ctx()).border), egui::StrokeKind::Inside);
+        let resp = ui.add(egui::TextEdit::singleline(&mut v).desired_width(84.0).id_salt(("theme-hex", key)));
+        let shown = v.clone();
+        resp.widget_info(move || {
+            let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, format!("{} hex", slot.label()));
+            info.current_text_value = Some(shown.clone());
+            info
+        });
+    });
+    d.fields.insert(key.into(), v);
+}
+
+fn theme_color_payload(d: &mut Dialog) -> Result<Value, String> {
+    let name = d.get("schemeName", "").trim().to_string();
+    if name.is_empty() {
+        return Err("Enter a scheme name.".into());
+    }
+    let mut colors = serde_json::Map::new();
+    for slot in SchemeSlot::THEME {
+        let raw = d.get(slot.xml_name(), "");
+        let Some(rgb) = deckcraft_color::Rgba::from_hex(raw.trim()) else {
+            return Err(format!("{} needs a colour like #RRGGBB.", slot.label()));
+        };
+        colors.insert(slot.xml_name().into(), Value::String(format!("#{}", rgb.hex())));
+    }
+    Ok(json!({"name": name, "colors": colors}))
+}
+
+/// Create New Theme Colors. Returns true when the dialog should close.
+fn theme_colors_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
+    seed_theme_colors(d);
+    // The window keeps the height of its contents and will not grow after the first frame, so the
+    // rows stay short enough that Save is inside that rect.
+    ui.style_mut().spacing.interact_size.y = 16.0;
+    ui.style_mut().spacing.item_spacing.y = 2.0;
+    ui.style_mut().spacing.button_padding.y = 2.0;
+    let left = [SchemeSlot::Dk1, SchemeSlot::Lt1, SchemeSlot::Dk2, SchemeSlot::Lt2, SchemeSlot::Hlink, SchemeSlot::FolHlink];
+    let right = [SchemeSlot::Accent1, SchemeSlot::Accent2, SchemeSlot::Accent3, SchemeSlot::Accent4, SchemeSlot::Accent5, SchemeSlot::Accent6];
+    egui::Grid::new("theme-colors").spacing(vec2(18.0, 4.0)).show(ui, |ui| {
+        for (a, b) in left.into_iter().zip(right) {
+            theme_color_row(ui, d, a);
+            theme_color_row(ui, d, b);
+            ui.end_row();
+        }
+    });
+    ui.add_space(6.0);
+    let mut name = d.get("schemeName", "");
+    ui.horizontal(|ui| {
+        ui.label("Name:");
+        let resp = ui.add(egui::TextEdit::singleline(&mut name).desired_width(280.0).id_salt("schemeName"));
+        let shown = name.clone();
+        resp.widget_info(move || {
+            let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Scheme name");
+            info.current_text_value = Some(shown.clone());
+            info
+        });
+    });
+    d.fields.insert("schemeName".into(), name);
+    ui.label(egui::RichText::new("Applies to this presentation's theme colours.").size(11.0).color(Tokens::get(ui.ctx()).text_dim));
+    let (ok, cancel) = buttons(ui, "Save");
+    if ok {
+        match theme_color_payload(d) {
+            Ok(payload) => return app.run("design.colors", payload).is_ok(),
+            Err(msg) => {
+                app.set_status(msg);
+                return false;
+            }
+        }
+    }
+    cancel
+}
+
+fn seed_theme_fonts(d: &mut Dialog) {
+    if d.fields.contains_key("seeded") {
+        return;
+    }
+    let name = d.params.get("name").and_then(Value::as_str).unwrap_or("Custom");
+    let major = d.params.get("major").and_then(Value::as_str).unwrap_or("Inter");
+    let minor = d.params.get("minor").and_then(Value::as_str).unwrap_or(major);
+    d.fields.insert("schemeName".into(), name.to_string());
+    d.fields.insert("major".into(), major.to_string());
+    d.fields.insert("minor".into(), minor.to_string());
+    d.fields.insert("seeded".into(), "1".into());
+}
+
+fn theme_font_choices(app: &SlideApp, selected: &str) -> Vec<String> {
+    let mut v = crate::ribbon::font_families(app);
+    for scheme in deckcraft_model::theme::builtin_font_schemes() {
+        v.push(scheme.major.latin);
+        v.push(scheme.minor.latin);
+    }
+    if !selected.is_empty() {
+        v.push(selected.to_string());
+    }
+    let mut seen = std::collections::HashSet::new();
+    v.retain(|face| !face.is_empty() && seen.insert(face.clone()));
+    v
+}
+
+fn font_combo(ui: &mut Ui, label: &str, choices: &[String], selected: &mut String) {
+    let resp = egui::ComboBox::from_id_salt(label).selected_text(selected.as_str()).width(240.0).show_ui(ui, |ui| {
+        for face in choices {
+            if ui.selectable_label(selected == face, face).clicked() {
+                *selected = face.clone();
+            }
+        }
+    });
+    let shown = selected.clone();
+    let access = label.to_string();
+    resp.response.widget_info(move || {
+        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, access.clone());
+        info.current_text_value = Some(shown.clone());
+        info
+    });
+}
+
+fn theme_font_payload(d: &mut Dialog) -> Result<Value, String> {
+    let name = d.get("schemeName", "").trim().to_string();
+    if name.is_empty() {
+        return Err("Enter a scheme name.".into());
+    }
+    let major = d.get("major", "").trim().to_string();
+    if major.is_empty() {
+        return Err("Choose a heading font.".into());
+    }
+    let minor = d.get("minor", "").trim().to_string();
+    if minor.is_empty() {
+        return Err("Choose a body font.".into());
+    }
+    Ok(json!({"name": name, "major": major, "minor": minor}))
+}
+
+/// Create New Theme Fonts. Returns true when the dialog should close.
+fn theme_fonts_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
+    seed_theme_fonts(d);
+    let major = d.get("major", "Inter");
+    let minor = d.get("minor", "Inter");
+    let headings = theme_font_choices(app, &major);
+    let bodies = theme_font_choices(app, &minor);
+    let mut major = major;
+    let mut minor = minor;
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(110.0, 18.0), egui::Label::new("Heading:"));
+        font_combo(ui, "Heading font", &headings, &mut major);
+    });
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(110.0, 18.0), egui::Label::new("Body:"));
+        font_combo(ui, "Body font", &bodies, &mut minor);
+    });
+    d.fields.insert("major".into(), major.clone());
+    d.fields.insert("minor".into(), minor.clone());
+    ui.add_space(4.0);
+    // Theme faces are not egui families; naming an unbound family panics. The lines show the
+    // chosen names at heading and body sizes.
+    ui.label(egui::RichText::new(format!("Heading sample  {major}")).size(20.0));
+    ui.label(egui::RichText::new(format!("Body sample  {minor}")).size(14.0));
+    ui.add_space(4.0);
+    let mut name = d.get("schemeName", "");
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(110.0, 18.0), egui::Label::new("Name:"));
+        let resp = ui.add(egui::TextEdit::singleline(&mut name).desired_width(240.0).id_salt("schemeName"));
+        let shown = name.clone();
+        resp.widget_info(move || {
+            let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Scheme name");
+            info.current_text_value = Some(shown.clone());
+            info
+        });
+    });
+    d.fields.insert("schemeName".into(), name);
+    ui.label(egui::RichText::new("Heading and body fonts for this presentation.").size(11.0).color(Tokens::get(ui.ctx()).text_dim));
+    let (ok, cancel) = buttons(ui, "Save");
+    if ok {
+        match theme_font_payload(d) {
+            Ok(payload) => return app.run("design.fonts", payload).is_ok(),
+            Err(msg) => {
+                app.set_status(msg);
+                return false;
+            }
+        }
+    }
+    cancel
+}
+
+/// What Insert Hyperlink would edit on the current selection.
+#[derive(Clone, Debug, PartialEq)]
+enum CurrentLink {
+    /// Nothing is linked. OK sets a new link (a caret at a word boundary inserts text).
+    None,
+    /// One link covers the text span or every selected shape.
+    One(deckcraft_model::text::Hyperlink),
+    /// The selection mixes different links. OK must not replace them until a new target is chosen.
+    Mixed,
+}
+
+/// Fields the Insert Hyperlink dialog opens with.
+#[derive(Clone, Debug, PartialEq)]
+struct HyperlinkSeed {
+    /// `url`, `email` or `slide`.
+    mode: &'static str,
+    url: String,
+    email: String,
+    slide: usize,
+    tip: String,
+    highlight: bool,
+    /// The action is not a web address, email or slide this dialog edits (or the selection mixes
+    /// links). OK leaves it in place until the user picks a different target.
+    preserve: bool,
+}
+
+impl HyperlinkSeed {
+    /// A new link: the address starts at `https://`, as the dialog always did.
+    fn blank() -> Self {
+        HyperlinkSeed { mode: "url", url: "https://".into(), email: String::new(), slide: 0, tip: String::new(), highlight: false, preserve: false }
+    }
+}
+
+/// Turn one hyperlink into dialog fields. A slide that is no longer in the deck, and actions this
+/// dialog does not edit (next slide, a program, …), are preserved so OK does not retarget them.
+fn seed_of_link(link: &deckcraft_model::text::Hyperlink, slide_ids: &[deckcraft_model::SlideId]) -> HyperlinkSeed {
+    use deckcraft_model::text::Action;
+    let mut seed = HyperlinkSeed {
+        mode: "url",
+        url: String::new(),
+        email: String::new(),
+        slide: 0,
+        tip: link.tooltip.clone(),
+        highlight: link.highlight_click,
+        preserve: true,
+    };
+    match &link.action {
+        Action::Url { url } => {
+            seed.preserve = false;
+            if let Some(email) = url.strip_prefix("mailto:") {
+                seed.mode = "email";
+                seed.email = email.to_string();
+                seed.url = "https://".into();
+            } else {
+                seed.url = url.clone();
+            }
+        }
+        Action::Slide { slide } => {
+            if let Some(i) = slide_ids.iter().position(|id| id == slide) {
+                seed.preserve = false;
+                seed.mode = "slide";
+                seed.slide = i;
+                seed.url = "https://".into();
+            }
+        }
+        _ => {}
+    }
+    seed
+}
+
+fn seed_from(current: CurrentLink, slide_ids: &[deckcraft_model::SlideId]) -> HyperlinkSeed {
+    match current {
+        CurrentLink::None => HyperlinkSeed::blank(),
+        CurrentLink::Mixed => HyperlinkSeed { preserve: true, url: String::new(), ..HyperlinkSeed::blank() },
+        CurrentLink::One(link) => seed_of_link(&link, slide_ids),
+    }
+}
+
+/// Links on the half-open span `[a, b)`. A point span is a new link: Insert Hyperlink inserts
+/// there instead of editing a neighbouring run.
+fn link_covering(body: &deckcraft_model::text::TextBody, a: (usize, usize), b: (usize, usize)) -> CurrentLink {
+    if a == b {
+        return CurrentLink::None;
+    }
+    let mut seen: Option<Option<deckcraft_model::text::Hyperlink>> = None;
+    for (pi, para) in body.paragraphs.iter().enumerate() {
+        if pi < a.0 || pi > b.0 {
+            continue;
+        }
+        let from = if pi == a.0 { a.1 } else { 0 };
+        let to = if pi == b.0 { b.1 } else { usize::MAX };
+        if from >= to {
+            continue;
+        }
+        let mut acc = 0usize;
+        let mut covered = false;
+        for run in &para.runs {
+            let len = run.char_len();
+            let end = acc + len;
+            if len > 0 && end > from && acc < to {
+                covered = true;
+                match &seen {
+                    None => seen = Some(run.props.link.clone()),
+                    Some(prev) if prev == &run.props.link => {}
+                    Some(_) => return CurrentLink::Mixed,
+                }
+            }
+            acc = end;
+        }
+        if !covered && para.char_len() == 0 {
+            match &seen {
+                None => seen = Some(para.end_props.link.clone()),
+                Some(prev) if prev == &para.end_props.link => {}
+                Some(_) => return CurrentLink::Mixed,
+            }
+        }
+    }
+    match seen {
+        Some(Some(link)) => CurrentLink::One(link),
+        _ => CurrentLink::None,
+    }
+}
+
+fn common_click(clicks: impl IntoIterator<Item = Option<deckcraft_model::text::Hyperlink>>) -> CurrentLink {
+    let mut clicks = clicks.into_iter();
+    let Some(first) = clicks.next() else { return CurrentLink::None };
+    for next in clicks {
+        if next != first {
+            return CurrentLink::Mixed;
+        }
+    }
+    match first {
+        Some(link) => CurrentLink::One(link),
+        None => CurrentLink::None,
+    }
+}
+
+/// The link Insert Hyperlink would edit: text when a caret or selection is active, otherwise the
+/// click action shared by the selected shapes.
+fn hyperlink_seed_of(st: Option<&deckcraft_engine::DocState>) -> HyperlinkSeed {
+    let Some(st) = st else { return HyperlinkSeed::blank() };
+    let ids: Vec<deckcraft_model::SlideId> = st.doc.slides.iter().map(|s| s.id).collect();
+    let current = if let Some(t) = &st.selection.text {
+        match deckcraft_engine::cmd::text::body_of(st, t) {
+            Some(body) => {
+                let (a, b) = deckcraft_engine::cmd::text::format_range(st, t);
+                link_covering(body, a, b)
+            }
+            None => CurrentLink::None,
+        }
+    } else {
+        common_click(st.selected_shapes().into_iter().map(|sh| sh.click.clone()))
+    };
+    seed_from(current, &ids)
+}
+
+/// OK writes a link unless the dialog is holding an action it does not edit and the user has not
+/// chosen a new target.
+fn hyperlink_should_apply(seed: &HyperlinkSeed, mode: &str, url: &str, email: &str, slide: usize) -> bool {
+    if !seed.preserve {
+        return true;
+    }
+    if mode != seed.mode {
+        return true;
+    }
+    match mode {
+        "email" => email != seed.email,
+        "slide" => slide != seed.slide,
+        _ => url != seed.url,
+    }
+}
+
+fn hyperlink_command(mode: &str, url: &str, email: &str, slide: usize, tip: &str, highlight: bool) -> Value {
+    match mode {
+        "slide" => json!({"slide": slide, "tooltip": tip, "highlightClick": highlight}),
+        "email" => json!({"url": format!("mailto:{email}"), "tooltip": tip, "highlightClick": highlight}),
+        _ => json!({"url": url, "tooltip": tip, "highlightClick": highlight}),
+    }
+}
+
+/// Preset percents in the Zoom dialog, largest first.
+const ZOOM_PRESETS: &[u32] = &[400, 200, 150, 100, 75, 66, 50, 33];
+
+/// A typed zoom percent as a scale in `0.1..=4` (10%–400%). `None` when it is not a finite number.
+pub fn parse_zoom_percent(text: &str) -> Option<f32> {
+    let t = text.trim().trim_end_matches('%').trim();
+    if t.is_empty() {
+        return None;
+    }
+    let v = t.parse::<f64>().ok().filter(|n| n.is_finite())?;
+    Some(((v / 100.0) as f32).clamp(0.1, 4.0))
+}
+
+/// Zoom dialog: a percent or Fit. Nothing changes until OK.
+fn zoom_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
+    if !d.fields.contains_key("mode") {
+        let shown = app.ui.zoom.unwrap_or(app.canvas_scale);
+        let pct = if shown.is_finite() { (shown * 100.0).round().clamp(10.0, 400.0) } else { 100.0 };
+        d.fields.insert("mode".into(), if app.ui.zoom.is_none() { "fit".into() } else { "percent".into() });
+        d.fields.insert("percent".into(), format!("{pct:.0}"));
+    }
+    let mut mode = d.get("mode", "percent");
+    let mut percent = d.get("percent", "100");
+    ui.label("Zoom to");
+    if ui.radio(mode == "fit", "Fit").clicked() {
+        mode = "fit".into();
+    }
+    for pct in ZOOM_PRESETS {
+        let on = mode == "percent" && percent == pct.to_string();
+        if ui.radio(on, format!("{pct}%")).clicked() {
+            mode = "percent".into();
+            percent = pct.to_string();
+        }
+    }
+    ui.horizontal(|ui| {
+        ui.label("Percent:");
+        let edit = ui.add(egui::TextEdit::singleline(&mut percent).desired_width(72.0));
+        if edit.changed() {
+            mode = "percent".into();
+        }
+        ui.label("%");
+    });
+    d.fields.insert("mode".into(), mode.clone());
+    d.fields.insert("percent".into(), percent.clone());
+    let (ok, cancel) = buttons(ui, "OK");
+    if ok {
+        if mode == "fit" {
+            app.ui.zoom = None;
+            return true;
+        }
+        match parse_zoom_percent(&percent) {
+            Some(scale) => app.ui.zoom = Some(scale),
+            None => {
+                app.set_status("Enter a zoom percent");
+                return false;
+            }
+        }
+    }
+    ok || cancel
+}
+
+/// Seconds for a Trim Media field. Three decimal places, trailing zeros dropped, so the text
+/// round-trips the millisecond value the clip stores.
+fn ms_as_seconds(ms: u32) -> String {
+    let s = format!("{:.3}", f64::from(ms) / 1000.0);
+    let trimmed = s.trim_end_matches('0').trim_end_matches('.');
+    if trimmed.is_empty() { "0".to_string() } else { trimmed.to_string() }
+}
+
+/// Parse a seconds field back to milliseconds. Blank, junk and negatives become 0; the result is
+/// rounded so `0.333` is 333 ms, not 332.
+fn seconds_text_to_ms(text: &str) -> u32 {
+    let v = text.trim().parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(0.0);
+    let ms = (v.max(0.0) * 1000.0).round();
+    if ms >= f64::from(u32::MAX) { u32::MAX } else { ms as u32 }
+}
+
+/// Start, end trim, fade in and fade out, as the Trim Media dialog shows them.
+struct TrimSeed {
+    start: String,
+    end: String,
+    fade_in: String,
+    fade_out: String,
+}
+
+impl TrimSeed {
+    fn zeros() -> Self {
+        TrimSeed { start: "0".into(), end: "0".into(), fade_in: "0".into(), fade_out: "0".into() }
+    }
+    fn from_clip(m: &deckcraft_model::MediaClip) -> Self {
+        TrimSeed {
+            start: ms_as_seconds(m.trim_start_ms),
+            end: ms_as_seconds(m.trim_end_ms),
+            fade_in: ms_as_seconds(m.fade_in_ms),
+            fade_out: ms_as_seconds(m.fade_out_ms),
+        }
+    }
+}
+
+/// The first selected audio or video. Other shapes in the selection are skipped. No media means
+/// the old zeros, which OK then stores.
+fn trim_seed(st: Option<&deckcraft_engine::DocState>) -> TrimSeed {
+    let Some(st) = st else { return TrimSeed::zeros() };
+    st.selected_shapes()
+        .into_iter()
+        .find_map(|sh| match &sh.kind {
+            deckcraft_model::ShapeKind::Media(m) => Some(TrimSeed::from_clip(m)),
+            _ => None,
+        })
+        .unwrap_or_else(TrimSeed::zeros)
 }
 
 /// Returns true when the dialog should close.
@@ -201,7 +1060,9 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             apply || apply_all || d.fields.contains_key("cancel")
         }
         "hyperlink" => {
-            let mode = d.get("mode", "url");
+            let seed = hyperlink_seed_of(app.session.active());
+            let slide_default = seed.slide.to_string();
+            let mode = d.get("mode", seed.mode);
             ui.horizontal(|ui| {
                 if ui.selectable_label(mode == "url", "Web Page or File").clicked() {
                     d.fields.insert("mode".into(), "url".into());
@@ -220,7 +1081,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                         .active()
                         .map(|s| s.doc.slides.iter().enumerate().map(|(i, sl)| format!("{}. {}", i + 1, sl.title())).collect())
                         .unwrap_or_default();
-                    let sel = d.get("slide", "0").parse::<usize>().unwrap_or(0);
+                    let sel = d.get("slide", &slide_default).parse::<usize>().unwrap_or(0);
                     egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
                         for (i, t) in titles.iter().enumerate() {
                             if ui.selectable_label(sel == i, t).clicked() {
@@ -229,19 +1090,20 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                         }
                     });
                 }
-                "email" => field(ui, d, "Email address:", "email", ""),
-                _ => field(ui, d, "Address:", "url", "https://"),
+                "email" => field(ui, d, "Email address:", "email", &seed.email),
+                _ => field(ui, d, "Address:", "url", &seed.url),
             }
-            field(ui, d, "ScreenTip:", "tip", "");
+            field(ui, d, "ScreenTip:", "tip", &seed.tip);
             let (ok, cancel) = buttons(ui, "OK");
             if ok {
-                let tip = d.get("tip", "");
-                let p = match mode.as_str() {
-                    "slide" => json!({"slide": d.get("slide", "0").parse::<usize>().unwrap_or(0), "tooltip": tip}),
-                    "email" => json!({"url": format!("mailto:{}", d.get("email", "")), "tooltip": tip}),
-                    _ => json!({"url": d.get("url", ""), "tooltip": tip}),
-                };
-                run(app, "insert.hyperlink", p);
+                let mode_now = d.get("mode", seed.mode);
+                let url = d.get("url", &seed.url);
+                let email = d.get("email", &seed.email);
+                let slide = d.get("slide", &slide_default).parse::<usize>().unwrap_or(0);
+                let tip = d.get("tip", &seed.tip);
+                if hyperlink_should_apply(&seed, &mode_now, &url, &email, slide) {
+                    run(app, "insert.hyperlink", hyperlink_command(&mode_now, &url, &email, slide, &tip, seed.highlight));
+                }
             }
             ok || cancel
         }
@@ -262,10 +1124,25 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             let nn = check(ui, d, "Show without narration", "nn", sh.without_narration);
             let na = check(ui, d, "Show without animation", "na", sh.without_animation);
             let ut = check(ui, d, "Use timings, if present", "ut", sh.use_timings);
+            let names: Vec<String> = app.session.active().map(|s| s.doc.custom_shows.iter().map(|c| c.name.clone()).collect()).unwrap_or_default();
+            let chosen = d.fields.entry("custom".into()).or_insert_with(|| sh.custom_show.clone().unwrap_or_default()).clone();
+            ui.label("Slides");
+            let label = if chosen.is_empty() { "All slides".to_string() } else { chosen.clone() };
+            egui::ComboBox::from_id_salt("setup_custom").selected_text(label).show_ui(ui, |ui| {
+                if ui.selectable_label(chosen.is_empty(), "All slides").clicked() {
+                    d.fields.insert("custom".into(), String::new());
+                }
+                for n in &names {
+                    if ui.selectable_label(&chosen == n, n).clicked() {
+                        d.fields.insert("custom".into(), n.clone());
+                    }
+                }
+            });
             let (ok, cancel) = buttons(ui, "OK");
             if ok {
                 let ty = d.get("type", "speaker");
-                run(app, "show.setup", json!({"type": ty, "loop": lp, "noNarration": nn, "noAnimation": na, "useTimings": ut}));
+                let custom = d.fields.get("custom").cloned().unwrap_or_default();
+                run(app, "show.setup", json!({"type": ty, "loop": lp, "noNarration": nn, "noAnimation": na, "useTimings": ut, "custom": custom}));
             }
             ok || cancel
         }
@@ -336,18 +1213,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             });
             done
         }
-        "zoom" => {
-            for pct in [400, 200, 150, 100, 75, 66, 50, 33] {
-                if ui.radio(false, format!("{pct}%")).clicked() {
-                    let _ = app.run("view.zoom", json!({"percent": pct}));
-                }
-            }
-            if ui.button("Fit").clicked() {
-                app.ui.zoom = None;
-            }
-            let (ok, cancel) = buttons(ui, "OK");
-            ok || cancel
-        }
+        "zoom" => zoom_dialog(app, ui, d),
         "comment" => {
             let mut v = d.get("text", "");
             ui.add(egui::TextEdit::multiline(&mut v).hint_text("Start a conversation").desired_rows(4).desired_width(320.0));
@@ -460,13 +1326,143 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             }
             ok || cancel || none
         }
+        "action" => {
+            use deckcraft_model::text::Action;
+            let tab = d.get("tab", "click");
+            // Start from the selected shape's current setting for this tab.
+            let (cur, slides, shows) = app
+                .session
+                .active()
+                .map(|st| {
+                    let sh = st.selected_shapes().first().map(|x| if tab == "hover" { x.hover.clone() } else { x.click.clone() }).unwrap_or(None);
+                    let slides: Vec<(deckcraft_model::SlideId, String)> =
+                        st.doc.slides.iter().enumerate().map(|(i, sl)| (sl.id, format!("{}. {}", i + 1, sl.title()))).collect();
+                    let shows: Vec<String> = st.doc.custom_shows.iter().map(|c| c.name.clone()).collect();
+                    (sh, slides, shows)
+                })
+                .unwrap_or_default();
+            let (cur_kind, cur_arg) = match cur.as_ref().map(|h| &h.action) {
+                None => ("none", String::new()),
+                Some(Action::NextSlide) => ("next", String::new()),
+                Some(Action::PreviousSlide) => ("previous", String::new()),
+                Some(Action::FirstSlide) => ("first", String::new()),
+                Some(Action::LastSlide) => ("last", String::new()),
+                Some(Action::LastViewed) => ("lastViewed", String::new()),
+                Some(Action::EndShow) => ("endShow", String::new()),
+                Some(Action::PlayMedia) => ("playMedia", String::new()),
+                Some(Action::Url { url }) => ("url", url.clone()),
+                Some(Action::CustomShow { name, .. }) => ("customShow", name.clone()),
+                Some(Action::Program { path }) => ("program", path.clone()),
+                Some(Action::Slide { slide }) => ("slide", slides.iter().position(|(id, _)| id == slide).unwrap_or(0).to_string()),
+            };
+            ui.horizontal(|ui| {
+                for (k, l) in [("click", "Mouse Click"), ("hover", "Mouse Over")] {
+                    if ui.selectable_label(tab == k, l).clicked() && tab != k {
+                        d.fields.clear();
+                        d.fields.insert("tab".into(), k.into());
+                    }
+                }
+            });
+            ui.separator();
+            ui.label(if tab == "hover" { "Action on mouse over" } else { "Action on click" });
+            let kind = d.get("kind", cur_kind);
+            let hyperlink = !matches!(kind.as_str(), "none" | "program" | "playMedia");
+            let pick = |d: &mut Dialog, ui: &mut Ui, k: &str, l: &str| {
+                if ui.radio(d.get("kind", cur_kind) == k, l).clicked() {
+                    d.fields.insert("kind".into(), k.into());
+                }
+            };
+            pick(d, ui, "none", "None");
+            ui.horizontal(|ui| {
+                if ui.radio(hyperlink, "Hyperlink to:").clicked() && !hyperlink {
+                    d.fields.insert("kind".into(), "next".into());
+                }
+                let targets = [
+                    ("next", "Next Slide"),
+                    ("previous", "Previous Slide"),
+                    ("first", "First Slide"),
+                    ("last", "Last Slide"),
+                    ("lastViewed", "Last Slide Viewed"),
+                    ("endShow", "End Show"),
+                    ("customShow", "Custom Show…"),
+                    ("slide", "Slide…"),
+                    ("url", "URL…"),
+                ];
+                let shown = targets.iter().find(|t| t.0 == kind).map_or("Next Slide", |t| t.1);
+                ui.add_enabled_ui(hyperlink, |ui| {
+                    egui::ComboBox::from_id_salt("action-target").selected_text(shown).show_ui(ui, |ui| {
+                        for (k, l) in targets {
+                            if ui.selectable_label(kind == k, l).clicked() {
+                                d.fields.insert("kind".into(), k.into());
+                            }
+                        }
+                    });
+                });
+            });
+            let kind = d.get("kind", cur_kind);
+            match kind.as_str() {
+                "url" => field(ui, d, "Address:", "arg", if cur_kind == "url" { &cur_arg } else { "https://" }),
+                "slide" => {
+                    let sel = d.get("arg", if cur_kind == "slide" { &cur_arg } else { "0" }).parse::<usize>().unwrap_or(0);
+                    egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                        for (i, (_, t)) in slides.iter().enumerate() {
+                            if ui.selectable_label(sel == i, t).clicked() {
+                                d.fields.insert("arg".into(), i.to_string());
+                            }
+                        }
+                    });
+                }
+                "customShow" => {
+                    if shows.is_empty() {
+                        ui.label("This presentation has no custom shows (Slide Show ▸ Custom Slide Show).");
+                    }
+                    let sel = d.get("arg", if cur_kind == "customShow" { &cur_arg } else { shows.first().map_or("", String::as_str) });
+                    for n in &shows {
+                        if ui.selectable_label(&sel == n, n).clicked() {
+                            d.fields.insert("arg".into(), n.clone());
+                        }
+                    }
+                }
+                _ => {}
+            }
+            pick(d, ui, "program", "Run program:");
+            if d.get("kind", cur_kind) == "program" {
+                field(ui, d, "Program:", "arg", if cur_kind == "program" { &cur_arg } else { "" });
+            }
+            pick(d, ui, "playMedia", "Play the shape's media");
+            let hl = check(ui, d, "Highlight click", "highlight", cur.as_ref().is_none_or(|h| h.highlight_click));
+            let (ok, cancel) = buttons(ui, "OK");
+            if ok {
+                let kind = d.get("kind", cur_kind);
+                let arg = d.get("arg", &cur_arg);
+                let mut p = json!({"on": tab, "action": kind, "highlight": hl});
+                match kind.as_str() {
+                    "url" => p["url"] = json!(arg),
+                    "slide" => p["slide"] = json!(arg.parse::<usize>().unwrap_or(0)),
+                    "customShow" => p["show"] = json!(arg),
+                    "program" => p["path"] = json!(arg),
+                    _ => {}
+                }
+                run(app, "shape.action", p);
+            }
+            ok || cancel
+        }
         "altText" => {
-            let cur = app.session.active().and_then(|s| s.selected_shapes().first().map(|x| x.descr.clone())).unwrap_or_default();
+            let (cur, deco_now) = app
+                .session
+                .active()
+                .map(|s| {
+                    let shapes = s.selected_shapes();
+                    let cur = shapes.first().map(|x| x.descr.clone()).unwrap_or_default();
+                    let deco = alt_text_starts_decorative(shapes.iter().map(|x| x.decorative));
+                    (cur, deco)
+                })
+                .unwrap_or_default();
             ui.label("How would you describe this object and its context to someone who is blind or has low vision?");
             let mut v = d.get("text", &cur);
             ui.add(egui::TextEdit::multiline(&mut v).desired_rows(4).desired_width(340.0));
             d.fields.insert("text".into(), v.clone());
-            let deco = check(ui, d, "Mark as decorative", "deco", false);
+            let deco = check(ui, d, "Mark as decorative", "deco", deco_now);
             let (ok, cancel) = buttons(ui, "OK");
             if ok {
                 run(app, "shape.altText", json!({"text": v, "decorative": deco}));
@@ -581,6 +1577,52 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 app.export_as(&fmt, extra);
             }
             ok || cancel
+        }
+        "replaceFonts" => {
+            let used: Vec<String> =
+                app.session.execute("font.used", &json!({})).ok().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+            let mut from = d.get("from", used.first().map(String::as_str).unwrap_or(""));
+            let mut to = d.get("to", "");
+            egui::Grid::new("replace_fonts").num_columns(2).spacing(vec2(10.0, 8.0)).show(ui, |ui| {
+                ui.label("Replace:");
+                egui::ComboBox::from_id_salt("rf_from").width(240.0).selected_text(from.clone()).show_ui(ui, |ui| {
+                    for f in &used {
+                        ui.selectable_value(&mut from, f.clone(), f);
+                    }
+                });
+                ui.end_row();
+                ui.label("With:");
+                ui.vertical(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut to).desired_width(240.0).hint_text("Font name"));
+                    let needle = to.trim().to_lowercase();
+                    egui::ScrollArea::vertical().max_height(140.0).id_salt("rf_list").show(ui, |ui| {
+                        for f in
+                            crate::ribbon::font_families(app).iter().filter(|f| needle.is_empty() || f.to_lowercase().contains(&needle)).take(200)
+                        {
+                            if ui.selectable_label(f.eq_ignore_ascii_case(to.trim()), f).clicked() {
+                                to = f.clone();
+                            }
+                        }
+                    });
+                });
+                ui.end_row();
+            });
+            if let Some(msg) = d.fields.get("result") {
+                ui.label(egui::RichText::new(msg.clone()).color(Tokens::get(ui.ctx()).text_dim));
+            }
+            d.fields.insert("from".into(), from.clone());
+            d.fields.insert("to".into(), to.clone());
+            let (ok, cancel) = buttons(ui, "Replace");
+            if ok && !from.is_empty() && !to.trim().is_empty() {
+                let n = app.run("font.replace", json!({"from": from, "to": to.trim()})).ok().and_then(|v| v["replaced"].as_u64()).unwrap_or(0);
+                let msg =
+                    if n == 0 { format!("“{from}” isn't used explicitly.") } else { format!("Replaced “{from}” with “{}”.", to.trim()) };
+                d.fields.insert("result".into(), msg);
+                d.fields.remove("from");
+                // Stay open, like PowerPoint, so several fonts can be replaced in a row.
+                return cancel;
+            }
+            cancel
         }
         "symbol" => {
             ui.label("Click a symbol to insert it at the insertion point.");
@@ -712,13 +1754,21 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
         }
         "customShow" => {
             let shows = app.session.active().map(|s| s.doc.custom_shows.clone()).unwrap_or_default();
+            let mut started = false;
             for s in &shows {
                 ui.horizontal(|ui| {
                     ui.label(format!("{} ({} slides)", s.name, s.slides.len()));
+                    if ui.small_button("Show").clicked() {
+                        run(app, "show.start", json!({"custom": s.name}));
+                        started = true;
+                    }
                     if ui.small_button("Delete").clicked() {
                         let _ = app.run("show.customShow", json!({"name": s.name, "delete": true}));
                     }
                 });
+            }
+            if started {
+                return true;
             }
             field(ui, d, "New show name:", "name", "Custom Show 1");
             field(ui, d, "Slides (e.g. 1,3,5):", "slides", "1");
@@ -783,16 +1833,22 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             ok || cancel
         }
         "trim" => {
-            field(ui, d, "Start time (s):", "start", "0");
-            field(ui, d, "End trim (s):", "end", "0");
-            field(ui, d, "Fade in (s):", "fin", "0");
-            field(ui, d, "Fade out (s):", "fout", "0");
+            let seed = trim_seed(app.session.active());
+            field(ui, d, "Start time (s):", "start", &seed.start);
+            field(ui, d, "End trim (s):", "end", &seed.end);
+            field(ui, d, "Fade in (s):", "fin", &seed.fade_in);
+            field(ui, d, "Fade out (s):", "fout", &seed.fade_out);
             let (ok, cancel) = buttons(ui, "OK");
             if ok {
                 run(
                     app,
                     "media.options",
-                    json!({"trimStart": (num(d, "start", 0.0) * 1000.0) as u64, "trimEnd": (num(d, "end", 0.0) * 1000.0) as u64, "fadeIn": (num(d, "fin", 0.0) * 1000.0) as u64, "fadeOut": (num(d, "fout", 0.0) * 1000.0) as u64}),
+                    json!({
+                        "trimStart": seconds_text_to_ms(&d.get("start", &seed.start)),
+                        "trimEnd": seconds_text_to_ms(&d.get("end", &seed.end)),
+                        "fadeIn": seconds_text_to_ms(&d.get("fin", &seed.fade_in)),
+                        "fadeOut": seconds_text_to_ms(&d.get("fout", &seed.fade_out)),
+                    }),
                 );
             }
             ok || cancel
@@ -820,6 +1876,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             let (ok, cancel) = buttons(ui, "Insert");
             if ok {
                 run(app, "insert.smartArt", json!({"kind": kind, "items": v.lines().filter(|l| !l.trim().is_empty()).collect::<Vec<_>>()}));
+                app.ui.pane = Some("smartart".into());
             }
             ok || cancel
         }
@@ -867,6 +1924,10 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             let (ok, _) = buttons(ui, "Done");
             ok
         }
+        "photoAlbum" => photo_album_dialog(app, ui, d),
+        "themeColors" => theme_colors_dialog(app, ui, d),
+        "themeFonts" => theme_fonts_dialog(app, ui, d),
+        "dateTime" => date_time_dialog(app, ui, d),
         _ => {
             ui.label(format!("“{}” is not available yet.", d.id));
             let (ok, cancel) = buttons(ui, "OK");
@@ -1114,6 +2175,97 @@ fn size_position_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool
     cancel
 }
 
+const DATE_LANGS: &[(&str, &str)] = &[
+    ("en-US", "English (United States)"),
+    ("en-GB", "English (United Kingdom)"),
+    ("fr-FR", "French (France)"),
+    ("ja-JP", "Japanese"),
+    ("sv-SE", "Swedish"),
+];
+
+const DATE_KINDS: [&str; 13] = [
+    "datetime1",
+    "datetime2",
+    "datetime3",
+    "datetime4",
+    "datetime5",
+    "datetime6",
+    "datetime7",
+    "datetime8",
+    "datetime9",
+    "datetime10",
+    "datetime11",
+    "datetime12",
+    "datetime13",
+];
+
+/// Samples `field_text` can compute for `lang`. Named months and AM/PM exist for English only;
+/// other languages keep the numeric date and the 24-hour times.
+fn date_rows(lang: &str) -> Vec<(&'static str, String)> {
+    let now = deckcraft_text::datetime::DateTime::now_local();
+    let mut rows = Vec::new();
+    for kind in DATE_KINDS {
+        if let Some(now) = now
+            && let Some(sample) = deckcraft_text::datetime::field_text(kind, Some(lang), now)
+        {
+            rows.push((kind, sample));
+        }
+    }
+    if rows.is_empty() {
+        rows.push(("datetime1", "datetime1".into()));
+    }
+    rows
+}
+
+fn date_time_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
+    ui.set_min_width(440.0);
+    ui.label("Available formats:");
+    let lang = d.get("language", "en-US");
+    let rows = date_rows(&lang);
+    if !rows.iter().any(|(k, _)| *k == d.get("format", "datetime1"))
+        && let Some((k, _)) = rows.first()
+    {
+        d.fields.insert("format".into(), (*k).to_string());
+    }
+    let format = d.get("format", "datetime1");
+    egui::ScrollArea::vertical().max_height(280.0).min_scrolled_height(220.0).auto_shrink([false, false]).show(ui, |ui| {
+        for (kind, sample) in &rows {
+            if ui.selectable_label(format == *kind, sample).clicked() {
+                d.fields.insert("format".into(), (*kind).to_string());
+            }
+        }
+    });
+    let lang_label = DATE_LANGS.iter().find(|(k, _)| *k == lang).map(|(_, l)| *l).unwrap_or("English (United States)");
+    ui.horizontal(|ui| {
+        ui.label("Language:");
+        let opened = egui::ComboBox::from_id_salt("date-lang").selected_text(lang_label).width(240.0).show_ui(ui, |ui| {
+            for (k, l) in DATE_LANGS {
+                if ui.selectable_label(lang == *k, *l).clicked() {
+                    d.fields.insert("language".into(), (*k).to_string());
+                }
+            }
+        });
+        opened.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, lang_label));
+    });
+    ui.label(
+        egui::RichText::new("Month names and AM/PM are listed for English. Other languages list the numeric date and 24-hour time.")
+            .size(11.0)
+            .color(Tokens::get(ui.ctx()).text_dim),
+    );
+    let update = check(ui, d, "Update automatically", "update", true);
+    let (ok, cancel) = buttons(ui, "OK");
+    if ok {
+        let lang = d.get("language", "en-US");
+        let mut format = d.get("format", "datetime1");
+        let probe = deckcraft_text::datetime::DateTime::new(2026, 10, 9, 20, 5, 7);
+        if deckcraft_text::datetime::field_text(&format, Some(&lang), probe).is_none() {
+            format = "datetime1".into();
+        }
+        return app.run("insert.dateTime", json!({"format": format, "update": update, "language": lang})).is_ok();
+    }
+    cancel
+}
+
 fn pretty_equation(s: &str) -> String {
     let sup = |c: char| match c {
         '0' => '⁰',
@@ -1209,3 +2361,239 @@ pub fn paint_logo(p: &egui::Painter, r: Rect) {
 #[cfg(test)]
 #[path = "size_position_tests.rs"]
 mod size_position_tests;
+
+#[cfg(test)]
+#[path = "photo_album_tests.rs"]
+mod photo_album_tests;
+
+#[cfg(test)]
+#[path = "theme_colors_tests.rs"]
+mod theme_colors_tests;
+
+#[cfg(test)]
+#[path = "theme_fonts_tests.rs"]
+mod theme_fonts_tests;
+
+#[cfg(test)]
+mod alt_text_tests {
+    use super::alt_text_starts_decorative;
+
+    #[test]
+    fn decorative_starts_checked_only_when_every_shape_is() {
+        assert!(!alt_text_starts_decorative([]));
+        assert!(!alt_text_starts_decorative([false]));
+        assert!(alt_text_starts_decorative([true]));
+        assert!(alt_text_starts_decorative([true, true]));
+        assert!(!alt_text_starts_decorative([true, false]));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use deckcraft_model::text::{Action, Hyperlink, Run, TextBody};
+    use deckcraft_model::{Presentation, SlideId};
+
+    use super::{
+        CurrentLink, HyperlinkSeed, common_click, hyperlink_command, hyperlink_seed_of, hyperlink_should_apply, link_covering, seed_from,
+        seed_of_link,
+    };
+
+    fn link(action: Action, tip: &str) -> Hyperlink {
+        Hyperlink { action, tooltip: tip.into(), highlight_click: false, sound: None, stop_sound: false }
+    }
+
+    fn url(address: &str, tip: &str) -> Hyperlink {
+        let mut h = link(Action::Url { url: address.into() }, tip);
+        h.highlight_click = tip == "glow";
+        h
+    }
+
+    #[test]
+    fn no_link_opens_as_a_new_web_address() {
+        let seed = seed_from(CurrentLink::None, &[]);
+        assert_eq!(seed, HyperlinkSeed::blank());
+        assert!(hyperlink_should_apply(&seed, "url", "https://", "", 0));
+    }
+
+    #[test]
+    fn web_email_and_slide_links_fill_the_dialog() {
+        let ids = [SlideId(7), SlideId(9)];
+        let web = seed_of_link(&url("https://example.org", "See"), &ids);
+        assert_eq!(web.mode, "url");
+        assert_eq!(web.url, "https://example.org");
+        assert_eq!(web.tip, "See");
+        assert!(!web.preserve);
+        assert!(hyperlink_should_apply(&web, "url", "https://example.org", "", 0));
+
+        let mail = seed_of_link(&url("mailto:a@b.org", "Write"), &ids);
+        assert_eq!(mail.mode, "email");
+        assert_eq!(mail.email, "a@b.org");
+        assert_eq!(mail.tip, "Write");
+        assert_eq!(hyperlink_command("email", "", "a@b.org", 0, "Write", false)["url"], "mailto:a@b.org");
+
+        let slide = seed_of_link(&link(Action::Slide { slide: SlideId(9) }, "There"), &ids);
+        assert_eq!(slide.mode, "slide");
+        assert_eq!(slide.slide, 1);
+        assert_eq!(slide.tip, "There");
+        assert!(!slide.preserve);
+
+        let glow = url("https://example.org", "glow");
+        assert!(glow.highlight_click);
+        assert!(seed_of_link(&glow, &ids).highlight);
+        assert_eq!(hyperlink_command("url", "https://example.org", "", 0, "glow", true)["highlightClick"], true);
+    }
+
+    #[test]
+    fn actions_this_dialog_does_not_edit_survive_ok() {
+        let next = seed_of_link(&link(Action::NextSlide, "On"), &[]);
+        assert!(next.preserve);
+        assert_eq!(next.tip, "On");
+        assert_eq!(next.url, "");
+        assert!(!hyperlink_should_apply(&next, "url", "", "", 0));
+        assert!(hyperlink_should_apply(&next, "url", "https://example.org", "", 0));
+
+        let gone = seed_of_link(&link(Action::Slide { slide: SlideId(99) }, ""), &[SlideId(1)]);
+        assert!(gone.preserve, "a missing slide is not retargeted to the first slide");
+        assert!(!hyperlink_should_apply(&gone, "url", "", "", 0));
+
+        let mixed = seed_from(CurrentLink::Mixed, &[]);
+        assert!(mixed.preserve);
+        assert!(!hyperlink_should_apply(&mixed, "url", "", "", 0));
+        assert!(hyperlink_should_apply(&mixed, "email", "", "a@b.org", 0));
+    }
+
+    #[test]
+    fn a_text_span_reports_the_link_it_covers() {
+        let mut body = TextBody::from_text("Hello world");
+        body.paragraphs[0].runs.clear();
+        body.paragraphs[0].runs.push(Run::new("Hello "));
+        let mut world = Run::new("world");
+        world.props.link = Some(url("https://example.org", "tip"));
+        body.paragraphs[0].runs.push(world);
+
+        assert_eq!(link_covering(&body, (0, 6), (0, 6)), CurrentLink::None, "a caret inserts; it does not edit the run beside it");
+        match link_covering(&body, (0, 6), (0, 11)) {
+            CurrentLink::One(h) => assert_eq!(h.tooltip, "tip"),
+            other => panic!("linked word, got {other:?}"),
+        }
+        assert_eq!(link_covering(&body, (0, 0), (0, 11)), CurrentLink::Mixed);
+
+        let mut other = url("https://example.org", "tip");
+        other.tooltip = "other".into();
+        assert_eq!(common_click([None, None]), CurrentLink::None);
+        assert!(matches!(common_click([Some(url("https://example.org", "tip"))]), CurrentLink::One(_)));
+        assert_eq!(common_click([Some(url("https://example.org", "tip")), Some(other)]), CurrentLink::Mixed);
+        assert_eq!(common_click(std::iter::empty()), CurrentLink::None);
+    }
+
+    #[test]
+    fn the_open_dialog_reads_the_caret_word_and_the_shape_click() {
+        let mut doc = Presentation::default();
+        let shape_id = {
+            let slide = std::sync::Arc::make_mut(&mut doc.slides[0]);
+            let mut body = TextBody::from_text("Hello world");
+            body.paragraphs[0].runs.clear();
+            body.paragraphs[0].runs.push(Run::new("Hello "));
+            let mut world = Run::new("world");
+            world.props.link = Some(url("https://example.org", "tip"));
+            body.paragraphs[0].runs.push(world);
+            slide.shapes[0].text = Some(body);
+            slide.shapes[0].id
+        };
+        let mut st = deckcraft_engine::DocState::new(doc, None, "t".into());
+        st.selection.text = Some(deckcraft_engine::TextSel { shape: shape_id, anchor: (0, 8), caret: (0, 8), ..Default::default() });
+        let seed = hyperlink_seed_of(Some(&st));
+        assert_eq!(seed.mode, "url");
+        assert_eq!(seed.url, "https://example.org");
+        assert_eq!(seed.tip, "tip");
+        assert!(!seed.preserve);
+
+        st.selection.text = None;
+        st.selection.shapes = vec![shape_id];
+        {
+            let doc = std::sync::Arc::make_mut(&mut st.doc);
+            let slide = std::sync::Arc::make_mut(&mut doc.slides[0]);
+            let shape = slide.shapes.iter_mut().find(|sh| sh.id == shape_id).unwrap();
+            let mut click = url("https://shape.example", "shape tip");
+            click.highlight_click = true;
+            shape.click = Some(click);
+        }
+        let seed = hyperlink_seed_of(Some(&st));
+        assert_eq!(seed.url, "https://shape.example");
+        assert_eq!(seed.tip, "shape tip");
+        assert!(seed.highlight);
+
+        st.selection.text = Some(deckcraft_engine::TextSel { shape: shape_id, anchor: (0, 11), caret: (0, 11), ..Default::default() });
+        let seed = hyperlink_seed_of(Some(&st));
+        assert_eq!(seed, HyperlinkSeed::blank(), "a caret at the end of the word inserts a new link");
+    }
+}
+
+#[cfg(test)]
+mod zoom_tests {
+    use super::parse_zoom_percent;
+
+    fn near(v: f32, want: f32) -> bool {
+        (v - want).abs() < 1.0e-4
+    }
+
+    #[test]
+    fn zoom_percent_accepts_a_number_and_clamps() {
+        assert!(parse_zoom_percent("150").is_some_and(|v| near(v, 1.5)));
+        assert!(parse_zoom_percent("150%").is_some_and(|v| near(v, 1.5)));
+        assert!(parse_zoom_percent("  100 ").is_some_and(|v| near(v, 1.0)));
+        assert!(parse_zoom_percent("1").is_some_and(|v| near(v, 0.1)));
+        assert!(parse_zoom_percent("900").is_some_and(|v| near(v, 4.0)));
+        assert!(parse_zoom_percent("").is_none());
+        assert!(parse_zoom_percent("fit").is_none());
+        assert!(parse_zoom_percent("nan").is_none());
+        assert!(parse_zoom_percent("inf").is_none());
+    }
+}
+
+#[cfg(test)]
+mod trim_media_tests {
+    use std::sync::Arc;
+
+    use deckcraft_model::{MediaClip, Presentation, ShapeId, ShapeKind};
+
+    use super::{ms_as_seconds, seconds_text_to_ms, trim_seed};
+
+    #[test]
+    fn trim_seconds_round_trip_the_stored_milliseconds() {
+        for ms in [0, 1, 250, 333, 1000, 1500, 60_000] {
+            let text = ms_as_seconds(ms);
+            assert_eq!(seconds_text_to_ms(&text), ms, "{text}");
+        }
+        assert_eq!(seconds_text_to_ms(""), 0);
+        assert_eq!(seconds_text_to_ms("nope"), 0);
+        assert_eq!(seconds_text_to_ms("-2"), 0);
+        assert_eq!(seconds_text_to_ms("1.5"), 1500);
+        assert_eq!(seconds_text_to_ms("999999999"), u32::MAX);
+    }
+
+    #[test]
+    fn trim_dialog_reads_the_selected_clip() {
+        assert_eq!(trim_seed(None).start, "0");
+        let mut doc = Presentation::default();
+        let media_id = {
+            let slide = Arc::make_mut(&mut doc.slides[0]);
+            let title = slide.shapes[0].id;
+            let clip = MediaClip { trim_start_ms: 1500, trim_end_ms: 250, fade_in_ms: 333, fade_out_ms: 1000, ..Default::default() };
+            let mut media = slide.shapes[0].clone();
+            media.id = ShapeId(900);
+            media.kind = ShapeKind::Media(clip);
+            slide.shapes.push(media);
+            (title, ShapeId(900))
+        };
+        let mut st = deckcraft_engine::DocState::new(doc, None, "t".into());
+        st.selection.shapes = vec![media_id.0];
+        assert_eq!(trim_seed(Some(&st)).start, "0", "a title shape is not a clip");
+        st.selection.shapes = vec![media_id.0, media_id.1];
+        let seed = trim_seed(Some(&st));
+        assert_eq!(seed.start, "1.5");
+        assert_eq!(seed.end, "0.25");
+        assert_eq!(seed.fade_in, "0.333");
+        assert_eq!(seed.fade_out, "1");
+    }
+}

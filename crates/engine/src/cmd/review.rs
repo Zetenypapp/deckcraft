@@ -45,7 +45,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set Up Slide Show…",
             ["Slide Show", "Set Up"],
             None,
-            "{type?: speaker|browsed|kiosk, loop?: bool, noNarration?, noAnimation?, useTimings?, from?, to?}",
+            "{type?: speaker|browsed|kiosk, loop?: bool, noNarration?, noAnimation?, useTimings?, showMediaControls?, from?, to?, custom?: name}",
             has_doc,
             setup
         ),
@@ -61,18 +61,27 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
 }
 
-fn now() -> String {
+/// Seconds since the Unix epoch: the system clock, or the browser's on wasm (which has no `SystemTime`).
+fn now_secs() -> u64 {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-        let (y, m, d) = super::design::civil((secs / 86_400) as i64);
-        let t = secs % 86_400;
-        format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", t / 3600, t / 60 % 60, t % 60)
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
     }
     #[cfg(target_arch = "wasm32")]
     {
-        String::new()
+        (js_sys::Date::now() / 1000.0).max(0.0) as u64
     }
+}
+
+/// A UTC timestamp as saved on comments: `2026-10-10T13:10:35Z`.
+fn iso_utc(secs: u64) -> String {
+    let (y, m, d) = super::design::civil((secs / 86_400) as i64);
+    let t = secs % 86_400;
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", t / 3600, t / 60 % 60, t % 60)
+}
+
+fn now() -> String {
+    iso_utc(now_secs())
 }
 
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
@@ -303,10 +312,24 @@ fn setup(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(v) = bool_param(p, "useTimings") {
             sh.use_timings = v;
         }
+        if let Some(v) = bool_param(p, "showMediaControls") {
+            sh.show_media_controls = v;
+        }
         match (p.get("from").and_then(Value::as_u64), p.get("to").and_then(Value::as_u64)) {
             (Some(a), Some(b)) => sh.range = Some((a.min(u32::MAX as u64) as u32, b.min(u32::MAX as u64) as u32)),
             (None, None) if p.get("all").is_some() => sh.range = None,
             _ => {}
+        }
+        if p.get("all").and_then(Value::as_bool) == Some(true) {
+            sh.range = None;
+            sh.custom_show = None;
+        }
+        if p.get("custom").is_some() {
+            let name = p.get("custom").and_then(Value::as_str).unwrap_or("");
+            sh.custom_show = if name.is_empty() { None } else { Some(name.to_string()) };
+            if sh.custom_show.is_some() {
+                sh.range = None;
+            }
         }
         Ok(serde_json::to_value(&*sh).unwrap_or_default())
     })
@@ -330,6 +353,7 @@ fn custom_show(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use serde_json::json;
 
     use crate::Session;
@@ -375,5 +399,44 @@ mod tests {
         s.execute("slide.go", &json!({"index": 0})).unwrap();
         let here = s.execute("comment.next", &json!({})).unwrap();
         assert_eq!(here["text"], "on first");
+    }
+
+    #[test]
+    fn timestamps_are_iso_utc() {
+        assert_eq!(iso_utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(iso_utc(1_791_637_835), "2026-10-10T13:10:35Z");
+    }
+
+    #[test]
+    fn the_clock_is_not_empty() {
+        // On wasm this used to return an empty string, so browser comments were saved undated.
+        assert!(now().starts_with("20"), "{}", now());
+    }
+
+    #[test]
+    fn show_media_controls_follow_setup() {
+        let mut s = Session::with_new();
+        assert!(s.doc().expect("doc").doc.show.show_media_controls);
+        let off = s.execute("show.setup", &json!({"showMediaControls": false})).expect("off");
+        assert_eq!(off["showMediaControls"], false);
+        assert_eq!(off["useTimings"], true, "other setup flags stay");
+        let timings = s.execute("show.setup", &json!({"useTimings": false})).expect("timings");
+        assert_eq!(timings["showMediaControls"], false);
+        assert_eq!(timings["useTimings"], false);
+        s.execute("show.setup", &json!({"showMediaControls": true})).expect("on");
+        assert!(s.doc().expect("doc").doc.show.show_media_controls);
+    }
+
+    #[test]
+    fn setup_remembers_a_custom_show() {
+        let mut s = Session::with_new();
+        s.execute("slide.new", &json!({})).unwrap();
+        s.execute("slide.new", &json!({})).unwrap();
+        s.execute("show.customShow", &json!({"name": "Short", "slides": [0, 1]})).unwrap();
+        let v = s.execute("show.setup", &json!({"custom": "Short"})).unwrap();
+        assert_eq!(v.get("customShow").and_then(Value::as_str), Some("Short"));
+        assert!(s.active().unwrap().doc.show.range.is_none());
+        s.execute("show.setup", &json!({"custom": ""})).unwrap();
+        assert!(s.active().unwrap().doc.show.custom_show.is_none());
     }
 }

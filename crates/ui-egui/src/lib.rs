@@ -6,11 +6,13 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod animtimeline;
 pub mod backstage;
 pub mod canvas;
 pub mod control;
 pub mod credits;
 pub mod dialogs;
+pub mod doc_window;
 pub mod eyedropper;
 pub mod fillui;
 pub mod icons;
@@ -18,6 +20,7 @@ pub mod keymap;
 pub mod media;
 pub mod menus;
 pub mod panes;
+pub mod qat;
 pub mod ribbon;
 pub mod selpane;
 pub mod show;
@@ -135,11 +138,14 @@ pub struct UiState {
     pub notes: bool,
     pub notes_height: f32,
     pub thumbs_width: f32,
-    /// Open task pane: `format`, `animation`, `selection`, `comments`, `designer`, `background`.
+    /// Open task pane: `format`, `animation`, `selection`, `comments`, `designer`, `background`,
+    /// `smartart` (Text Pane).
     pub pane: Option<String>,
     pub pane_width: f32,
     pub ruler: bool,
     pub gridlines: bool,
+    /// Slides per page previewed in Handout Master view (1, 2, 3, 4, 6 or 9).
+    pub handout_per_page: u8,
     pub guides: bool,
     pub smart_guides: bool,
     /// None = fit to window.
@@ -150,10 +156,18 @@ pub struct UiState {
     pub ui_scale: f32,
     /// Format Shape pane: tab (`fill`, `effects`, `size`, `picture`, `text`).
     pub format_tab: String,
+    /// The Text Pane's current SmartArt line (Add Shape, Promote and Demote act on it).
+    pub smartart_row: usize,
+    /// A Text Pane line to focus once it is drawn (after Enter, Tab or Backspace rebuilt the list).
+    pub smartart_focus: Option<usize>,
+    /// The Text Pane's line drafts, for the SmartArt group they were read from.
+    pub smartart_drafts: (u32, Vec<String>),
     pub grayscale: bool,
     /// Comment the Review Previous/Next buttons last landed on: `(slide, index)`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comment_focus: Option<(usize, usize)>,
+    /// Quick Access Toolbar buttons, left to right.
+    pub qat: Vec<qat::QatItem>,
 }
 
 impl Default for UiState {
@@ -175,6 +189,7 @@ impl Default for UiState {
             pane_width: 300.0,
             ruler: false,
             gridlines: false,
+            handout_per_page: 6,
             guides: false,
             smart_guides: true,
             zoom: None,
@@ -183,8 +198,12 @@ impl Default for UiState {
             presenter_view: true,
             ui_scale: 1.0,
             format_tab: "fill".into(),
+            smartart_row: 0,
+            smartart_focus: None,
+            smartart_drafts: (0, vec![]),
             grayscale: false,
             comment_focus: None,
+            qat: qat::defaults(),
         }
     }
 }
@@ -218,9 +237,10 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("view.guides", "Guides", Some("Alt+F9"), "{on?: bool}"),
     ("view.zoomIn", "Zoom In", Some("Cmd+="), "{}"),
     ("view.zoomOut", "Zoom Out", Some("Cmd+-"), "{}"),
-    ("view.zoom", "Zoom…", None, "{percent}"),
+    ("view.zoom", "Set Zoom", None, "{percent}"),
+    ("view.zoomDialog", "Zoom…", None, "{}"),
     ("view.fit", "Fit to Window", None, "{}"),
-    ("view.pane", "Task Pane", None, "{pane: format|animation|selection|comments|designer|background|null}"),
+    ("view.pane", "Task Pane", None, "{pane: format|animation|selection|comments|designer|background|smartart|null}"),
     ("view.tab", "Ribbon Tab", None, "{tab}"),
     ("view.collapseRibbon", "Collapse the Ribbon", Some("Cmd+F1"), "{}"),
     ("view.dark", "Dark Mode", None, "{on?: bool}"),
@@ -231,7 +251,8 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
         "{theme?: standard|highContrast|lagoon|sunset|custom, tint?: #rrggbb, accent?: #rrggbb, strength?: 0-1}",
     ),
     ("view.grayscale", "Grayscale", None, "{on?: bool}"),
-    ("show.start", "Slide Show", Some("F5"), "{from?: index}"),
+    ("view.newWindow", "New Window", None, "{on?: bool, slide?: index, delta?: int}"),
+    ("show.start", "Slide Show", Some("F5"), "{from?: index, custom?: name}"),
     ("show.presenter", "Presenter View", None, "{on?: bool}"),
     ("show.end", "End Show", None, "{}"),
     ("app.home", "Home", None, "{on?}"),
@@ -253,12 +274,15 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.preferences", "Preferences…", Some("Cmd+,"), "{}"),
     ("app.openDialog", "Open…", None, "{purpose?}"),
     ("app.insertPictureDialog", "Picture from File…", None, "{}"),
+    ("app.smartArtPictureDialog", "Insert Picture in SmartArt…", None, "{id?, index}"),
     ("app.insertAudioDialog", "Audio from File…", None, "{}"),
     ("app.insertVideoDialog", "Video from File…", None, "{}"),
     ("app.saveAsDialog", "Save As…", None, "{}"),
     ("app.exportDialog", "Export…", None, "{}"),
+    ("app.browseThemeDialog", "Browse for Themes…", None, "{}"),
     ("app.dialog", "Open Dialog", None, "{id}"),
     ("app.pasteSpecial", "Paste Special…", Some("Cmd+Alt+V"), "{}"),
+    ("app.qat", "Quick Access Toolbar", None, "{add: command id, params?, label?, icon?} | {remove: id, params?} | {reset: true} → [buttons]"),
     ("app.links", "Community Links", None, "{}"),
     ("keys.list", "Keyboard Shortcuts", None, "{} → [{id, label, group, scope, keys, defaults, custom}]"),
     ("keys.set", "Set Keyboard Shortcut", None, "{action, keys: [\"Cmd+Shift+K\"…], replace?: bool}"),
@@ -285,6 +309,8 @@ pub struct Perf {
 }
 
 pub struct SlideApp {
+    /// Table Design's border pen (`color`, `width`, `dash` for `table.borders`).
+    pub table_pen: serde_json::Value,
     pub session: Session,
     pub services: Services,
     pub ui: UiState,
@@ -338,12 +364,19 @@ pub struct SlideApp {
     pub(crate) thumb_drag: Option<(usize, usize)>,
     /// Selection pane: folded groups, renaming, drag and drop.
     pub selpane: selpane::State,
+    /// View › New Window: a second window on one presentation. `None` when it is closed.
+    pub doc_window: Option<doc_window::DocWindow>,
+    /// Slide Sorter: folded sections, inline rename, dragging a whole section.
+    pub sorter: sorter::State,
+    /// The slide thumbnail pane was the last thing clicked, so ⌘A selects slides, not shapes.
+    pub(crate) slides_focused: bool,
 }
 
 impl SlideApp {
     pub fn new(session: Session, mut services: Services) -> Self {
         let audio_out = services.audio_out.take();
         SlideApp {
+            table_pen: serde_json::json!({"width": 1.0}),
             session,
             services,
             ui: UiState::default(),
@@ -380,6 +413,9 @@ impl SlideApp {
             ui_fonts: uifonts::UiFonts::default(),
             thumb_drag: None,
             selpane: selpane::State::default(),
+            doc_window: None,
+            sorter: sorter::State::default(),
+            slides_focused: false,
         }
     }
 
@@ -725,8 +761,10 @@ impl SlideApp {
         let Some(doc) = self.session.active().map(|d| d.doc.clone()) else { return false };
         let bytes = match format {
             "png" | "jpeg" => {
-                let img = deckcraft_render::render_slide(&doc, slide, &deckcraft_render::RenderOpts { scale: 2.0, ..Default::default() });
-                Ok(if format == "png" { img.to_png() } else { img.to_jpeg(92) })
+                let scale = 2.0;
+                let img = deckcraft_render::render_slide(&doc, slide, &deckcraft_render::RenderOpts { scale, ..Default::default() });
+                let dpi = deckcraft_render::dpi_for_scale(scale);
+                Ok(if format == "png" { img.to_png_at(dpi) } else { img.to_jpeg_at(92, Some(dpi)) })
             }
             "pdf" => deckcraft_engine::cmd::file::pdf_bytes(&doc, &extra),
             other => deckcraft_engine::cmd::file::save_bytes(&doc, other),
@@ -809,6 +847,7 @@ impl SlideApp {
                 let pct = p.get("percent").and_then(Value::as_f64).ok_or("missing `percent`")?;
                 self.ui.zoom = Some((pct as f32 / 100.0).clamp(0.1, 4.0));
             }
+            "view.zoomDialog" => self.dialog = Some(dialogs::Dialog::new("zoom")),
             "view.fit" => self.ui.zoom = None,
             "view.pane" => {
                 let pane = p.get("pane").and_then(Value::as_str).map(String::from);
@@ -862,9 +901,16 @@ impl SlideApp {
                 self.restyle = true;
             }
             "view.grayscale" => self.ui.grayscale = self.flag(p, self.ui.grayscale),
+            "view.newWindow" => return doc_window::command(self, p),
             "show.start" => {
-                let from = p.get("from").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(0);
-                self.start_show(from, false);
+                if let Some(name) = p.get("custom").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                    self.start_custom_show(name, false);
+                } else if p.get("from").is_some() {
+                    let from = p.get("from").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(0);
+                    self.start_show(from, false);
+                } else {
+                    self.start_show(self.show_start_index(), false);
+                }
             }
             "show.presenter" => self.ui.presenter_view = self.flag(p, self.ui.presenter_view),
             "show.end" => {
@@ -913,11 +959,29 @@ impl SlideApp {
             "app.preferences" => self.dialog = Some(dialogs::Dialog::new("preferences")),
             "app.openDialog" => self.pick_and_open(),
             "app.insertPictureDialog" => self.pick_and_insert("picture", "insert.picture"),
+            "app.smartArtPictureDialog" => {
+                if self.services.pick_open.is_none() {
+                    return Err("picking a SmartArt picture needs the desktop app".into());
+                }
+                self.pick_and_run("picture", "smartArt.picture", p);
+            }
             "app.insertAudioDialog" => self.pick_and_insert("audio", "insert.audio"),
             "app.insertVideoDialog" => self.pick_and_insert("video", "insert.video"),
             "app.saveAsDialog" => self.save_as_dialog("deckcraft"),
             "app.exportDialog" => self.dialog = Some(dialogs::Dialog::new("export")),
             "app.pasteSpecial" => self.dialog = Some(dialogs::Dialog::new("pasteSpecial")),
+            "app.browseThemeDialog" => {
+                if self.session.active().is_none() {
+                    return Err("open a presentation first".into());
+                }
+                if self.services.pick_open.is_some() {
+                    self.pick_and_insert("theme", "design.browseTheme");
+                } else {
+                    // The browser's asynchronous picker would open the file as a new document.
+                    self.set_status("Browse for Themes needs the desktop app for now".to_string());
+                }
+            }
+            "app.qat" => return qat::command(self, p),
             "app.dialog" => {
                 let d = p.get("id").and_then(Value::as_str).ok_or("missing `id`")?;
                 self.dialog = Some(dialogs::Dialog::new(d));
@@ -931,10 +995,32 @@ impl SlideApp {
         Ok(Value::Null)
     }
 
+    /// Whether ⌘A should act on the slide list: always in the sorter, in Normal view once the
+    /// thumbnail pane has been clicked.
+    pub(crate) fn slides_list_focused(&self) -> bool {
+        self.ui.view == ViewMode::Sorter || (self.ui.view == ViewMode::Normal && self.slides_focused)
+    }
+
+    /// First slide Play from Start should open: the custom show or range, skipping hidden slides.
+    pub fn show_start_index(&self) -> usize {
+        self.session.active().and_then(|d| deckcraft_anim::show_order(&d.doc).first().copied()).unwrap_or(0)
+    }
+
     pub fn start_show(&mut self, from: usize, reading: bool) {
         self.media.stop_owned(media::Owner::Editor);
         if let Some(d) = self.session.active() {
             self.show = Some(show::Show::new(&d.doc, from, reading, self.ui.presenter_view && !reading));
+        }
+    }
+
+    /// Play custom show `name` from its first slide. Set Up Slide Show is left as it was.
+    pub fn start_custom_show(&mut self, name: &str, reading: bool) {
+        let state = self.session.active().and_then(|d| deckcraft_anim::ShowState::play_custom(&d.doc, name));
+        let Some(state) = state else { return };
+        let from = state.slide;
+        self.start_show(from, reading);
+        if let Some(show) = self.show.as_mut() {
+            show.state = state;
         }
     }
 
@@ -967,14 +1053,25 @@ impl SlideApp {
     }
 
     fn pick_and_insert(&mut self, purpose: &str, cmd: &str) {
+        self.pick_and_run(purpose, cmd, &json!({}));
+    }
+
+    /// Pick a file and run `cmd` with it (`name` + `data`, or `path`) added to `extra`.
+    fn pick_and_run(&mut self, purpose: &str, cmd: &str, extra: &Value) {
         if let Some(pick) = self.services.pick_open.as_mut() {
             if let Some(path) = pick(purpose) {
+                let mut args = if extra.is_object() { extra.clone() } else { json!({}) };
                 let r = match self.services.read.as_ref().map(|r| r(&path)) {
                     Some(Ok(bytes)) => {
                         let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                        self.session.execute(cmd, &json!({"name": name, "data": deckcraft_engine::cmd::base64_encode(&bytes)}))
+                        args["name"] = json!(name);
+                        args["data"] = json!(deckcraft_engine::cmd::base64_encode(&bytes));
+                        self.session.execute(cmd, &args)
                     }
-                    _ => self.session.execute(cmd, &json!({"path": path})),
+                    _ => {
+                        args["path"] = json!(path);
+                        self.session.execute(cmd, &args)
+                    }
                 };
                 if let Err(e) = r {
                     self.set_status(e.to_string());
@@ -1054,8 +1151,8 @@ impl SlideApp {
                 }
                 UiRequest::Media { action, shape, ms } => {
                     let owner = if self.show.is_some() { media::Owner::Show } else { media::Owner::Editor };
-                    if let Some(doc) = self.session.active().map(|d| d.doc.clone()) {
-                        self.media.request(&doc, &action, shape, ms, owner);
+                    if let Some((uid, doc)) = self.session.active().map(|d| (d.uid, d.doc.clone())) {
+                        self.media.request(uid, &doc, &action, shape, ms, owner);
                     }
                 }
             }
@@ -1363,6 +1460,7 @@ impl SlideApp {
         eyedropper::tick(self, &ctx);
         if self.show.is_some() {
             show::ui(self, ui);
+            doc_window::show(self, &ctx);
             self.perf.frame_ms = now_ms() - t0;
             return;
         }
@@ -1415,11 +1513,15 @@ impl SlideApp {
             ctx.copy_text(t);
         }
         self.drain_requests();
+        doc_window::show(self, &ctx);
         self.perf.frame_ms = now_ms() - t0;
     }
 
-    /// Media clocks and video textures; the editor's media stops when its slide is left.
+    /// Media clocks and video textures. Voices belong to the open presentation: closing the last
+    /// one, or switching decks, stops them. The editor's media also stops when its slide is left.
     fn tick_media(&mut self, ctx: &egui::Context) {
+        let uid = self.session.active().map(|d| d.uid);
+        self.media.set_document(uid);
         if !self.media.any_active() {
             self.session.media_status.clear();
             return;
@@ -1557,11 +1659,25 @@ fn js_now() -> f64 {
 }
 
 #[cfg(test)]
+mod animpane_tests;
+#[cfg(test)]
+mod browsetheme_tests;
+#[cfg(test)]
 mod eyedropper_tests;
+#[cfg(test)]
+mod huge_deck_tests;
 #[cfg(test)]
 mod ime_tests;
 #[cfg(test)]
+mod replacefonts_tests;
+#[cfg(test)]
+mod slide_size_tests;
+#[cfg(test)]
 mod ui_soak_tests;
+
+#[cfg(test)]
+#[path = "datetime_tests.rs"]
+mod datetime_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1573,6 +1689,40 @@ mod tests {
         let d = app.session.active().unwrap();
         let sh = &d.doc.slides[0].shapes[0];
         sh.text.as_ref().map(|t| t.paragraphs.iter().map(|p| p.text()).collect::<Vec<_>>().join("\n")).unwrap_or_default()
+    }
+
+    #[test]
+    fn quick_access_toolbar_adds_removes_resets_and_persists() {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        let ids = |app: &SlideApp| app.ui.qat.iter().map(|q| q.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(harness.state()), ["app.home", "file.save", "app.exportDialog", "edit.undo", "edit.redo", "show.fromStart"]);
+        let app = harness.state_mut();
+        app.run("app.qat", json!({"add": "insert.table", "label": "Table", "icon": "table"})).unwrap();
+        app.run("app.qat", json!({"add": "insert.table"})).unwrap();
+        app.run("app.qat", json!({"add": "view.pane", "params": {"pane": "selection"}, "label": "Selection Pane"})).unwrap();
+        assert!(app.run("app.qat", json!({"add": "no.such"})).is_err());
+        app.run("app.qat", json!({"remove": "edit.redo"})).unwrap();
+        assert_eq!(ids(app), ["app.home", "file.save", "app.exportDialog", "edit.undo", "show.fromStart", "insert.table", "view.pane"]);
+        assert_eq!(app.ui.qat[5].label, "Table");
+        // Saved with the rest of the UI state and read back.
+        let back: UiState = serde_json::from_value(serde_json::to_value(&app.ui).unwrap()).unwrap();
+        assert_eq!(back.qat, app.ui.qat);
+        harness.run_steps(2);
+        let app = harness.state_mut();
+        app.run("app.qat", json!({"remove": "view.pane", "params": {"pane": "selection"}})).unwrap();
+        assert_eq!(app.ui.qat.len(), 6);
+        app.run("app.qat", json!({"reset": true})).unwrap();
+        assert_eq!(ids(app), ["app.home", "file.save", "app.exportDialog", "edit.undo", "edit.redo", "show.fromStart"]);
+        // An older settings file without the toolbar gets the defaults.
+        let old: UiState = serde_json::from_value(json!({"tab": "Home"})).unwrap();
+        assert_eq!(old.qat.len(), 6);
     }
 
     #[test]
@@ -1760,6 +1910,42 @@ mod tests {
         app.run("app.home", json!({})).unwrap();
         assert!(!app.backstage_open(), "with nothing open the start screen shows anyway");
     }
+
+    /// View › New Window is a second window on the open presentation. Its slide is its own;
+    /// the editor's selection stays where it was. Closing the window leaves the document open.
+    #[test]
+    fn new_window_shows_the_same_document_on_its_own_slide() {
+        let mut app = SlideApp::new(Session::with_new(), Services::default());
+        app.session.execute("slide.new", &json!({})).unwrap();
+        app.session.execute("slide.go", &json!({"index": 1})).unwrap();
+        let err = {
+            let mut empty = SlideApp::new(Session::new(), Services::default());
+            empty.run("view.newWindow", json!({})).unwrap_err()
+        };
+        assert!(err.contains("presentation"), "{err}");
+
+        let name = app.session.active().unwrap().title();
+        let opened = app.run("view.newWindow", json!({})).unwrap();
+        assert_eq!(opened["open"], true);
+        assert_eq!(opened["window"], 2);
+        assert_eq!(opened["slide"], 1);
+        assert_eq!(opened["title"], format!("{name}:2"));
+        assert_eq!(app.session.active().unwrap().selection.slide, 1);
+
+        let moved = app.run("view.newWindow", json!({"delta": -1})).unwrap();
+        assert_eq!(moved["slide"], 0);
+        assert_eq!(app.doc_window.as_ref().unwrap().slide, 0);
+        assert_eq!(app.session.active().unwrap().selection.slide, 1, "the editor stays on its slide");
+
+        let again = app.run("view.newWindow", json!({})).unwrap();
+        assert_eq!(again["window"], 2);
+        assert_eq!(again["slide"], 0, "opening again keeps the window's slide");
+
+        app.session.execute("file.close", &json!({})).unwrap();
+        doc_window::show(&mut app, &egui::Context::default());
+        assert!(app.doc_window.is_none(), "closing the presentation closes the extra window");
+        assert!(app.session.active().is_none());
+    }
     fn canvas_harness() -> egui_kittest::Harness<'static, SlideApp> {
         let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
             |ui, app: &mut SlideApp| {
@@ -1929,5 +2115,47 @@ mod tests {
         let d = harness.state().session.active().unwrap();
         let pasted = d.doc.slides[0].shapes.last().unwrap();
         assert!(pasted.text.as_ref().is_none_or(|t| t.text().is_empty()), "a copy of the rectangle, not a text box holding the marker");
+    }
+
+    /// #188: Ctrl/Cmd+A with the slide thumbnail pane focused selects every slide; with the
+    /// canvas focused it still selects shapes.
+    #[test]
+    fn select_all_follows_the_focused_pane() {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        for _ in 0..2 {
+            harness.state_mut().run("slide.new", json!({})).unwrap();
+        }
+        harness.state_mut().run("slide.go", json!({"index": 0})).unwrap();
+        harness.run_steps(3);
+        let click = |h: &mut egui_kittest::Harness<'_, SlideApp>, pos: egui::Pos2| {
+            h.event(egui::Event::PointerMoved(pos));
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+            }
+            h.run_steps(2);
+        };
+        // Press in the thumbnail pane, then Cmd+A.
+        let w = harness.state().ui.thumbs_width;
+        click(&mut harness, egui::pos2(w / 2.0, 300.0));
+        assert!(harness.state().slides_focused);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run_steps(2);
+        let st = harness.state().session.active().unwrap();
+        assert_eq!(st.selection.slides.len(), 3, "every slide is selected");
+
+        // A press on the canvas moves focus away: Cmd+A selects shapes again.
+        click(&mut harness, egui::pos2(700.0, 400.0));
+        assert!(!harness.state().slides_focused);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run_steps(2);
+        let st = harness.state().session.active().unwrap();
+        assert!(!st.selection.shapes.is_empty(), "canvas select all picks the shapes");
     }
 }

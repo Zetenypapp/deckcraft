@@ -952,10 +952,12 @@ dependencies = [
  "deckcraft-text",
  "i_overlay",
  "image",
+ "js-sys",
  "log",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "zip",
 ]
 
 [[package]]
@@ -1051,6 +1053,7 @@ dependencies = [
 name = "deckcraft-metafile"
 version = "0.7.0"
 dependencies = [
+ "image",
  "kurbo",
  "thiserror 2.0.21",
 ]

@@ -1,12 +1,14 @@
 //! PPTX import: package → [`Presentation`].
 
-mod chart;
+pub(crate) mod chart;
+mod chartex;
 pub(crate) mod dml;
 mod shapes;
 mod theme;
 mod timing;
 
 pub(crate) use chart::{chart_from as chart_from_el, read_chart_xml};
+pub(crate) use chartex::{chartex_from, read_chartex_xml};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -155,7 +157,16 @@ pub fn keep_xml(el: &El, ns: &[(String, String)]) -> String {
 }
 
 /// Namespace prefixes whose `mc:Choice` content we understand.
-const SUPPORTED_MC: [&str; 9] = ["p14", "p15", "p159", "a14", "a16", "p1510", "a15", "c14", "p188"];
+const SUPPORTED_MC: [&str; 10] = ["p14", "p15", "p159", "a14", "a16", "p1510", "a15", "c14", "p188", "cx1"];
+
+/// Office 2016 charts sit in a `cx1` choice; take it only for a layout DeckCraft reads (the
+/// fallback is a picture or "this chart isn't available" text). The part is checked later, when
+/// the frame is read, so here only the namespace counts.
+fn chartex_readable(ch: &El) -> bool {
+    let mut found = vec![];
+    ch.find_all("graphicData", &mut found);
+    found.iter().any(|g| g.attr("uri").is_some_and(|u| u.ends_with("/chartex")))
+}
 
 /// A relationship to an embedded 3-D model (`.glb`).
 pub(crate) fn is_model3d(rel: &opc::Rel) -> bool {
@@ -176,6 +187,89 @@ fn choice_has_model3d(el: &El, rels: &Rels) -> bool {
         el.elements().any(|c| rec(c, rels, depth + 1))
     }
     rec(el, rels, 0)
+}
+
+/// Add-in tags named by `holder`'s `p:custDataLst`: the name/value pairs of each tags part.
+pub fn tags(imp: &Imp, part: &Part, holder: &El) -> Vec<(String, String)> {
+    let Some(list) = holder.child("custDataLst") else { return vec![] };
+    let mut out = Vec::new();
+    for t in list.children_named("tags").take(100) {
+        let Some(doc) = t.attr("r:id").and_then(|id| part.rels.get(id)).and_then(|r| imp.pkg.xml(&r.target)) else { continue };
+        for tag in doc.root.children_named("tag").take(10_000) {
+            if let Some(name) = tag.attr("name") {
+                out.push((name.to_string(), tag.attr("val").unwrap_or("").to_string()));
+            }
+        }
+    }
+    out
+}
+
+/// Relationship types whose parts are kept verbatim, and whether they hang off the package root.
+const KEPT_RELS: [(&str, bool); 3] = [
+    ("http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml", false),
+    ("http://schemas.microsoft.com/office/2020/02/relationships/classificationlabels", true),
+    ("http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties", true),
+];
+
+/// A part we may keep: outside `ppt/` and the properties the writer makes itself.
+fn keepable(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    !n.is_empty()
+        && !n.contains("..")
+        && !n.starts_with("ppt/")
+        && n != "docprops/core.xml"
+        && n != "docprops/app.xml"
+        && !n.starts_with("[content_types]")
+}
+
+/// Custom XML data, sensitivity labels and custom properties, with the parts they relate to
+/// (`itemProps`) and their relationships parts, as written.
+fn kept_parts(pkg: &Package, pres_path: &str) -> Vec<deckcraft_model::KeptPart> {
+    use deckcraft_model::KeptPart;
+    let mut out: Vec<KeptPart> = Vec::new();
+    let text = |name: &str| pkg.get(name).and_then(|b| std::str::from_utf8(b).ok()).map(str::to_string);
+    for (holder, from_root) in [("", true), (pres_path, false)] {
+        let Some(doc) = pkg.xml(&opc::rels_path(holder)) else { continue };
+        let base = opc::dir_of(holder);
+        for r in doc.root.children_named("Relationship") {
+            let (Some(ty), Some(target)) = (r.attr("Type"), r.attr("Target")) else { continue };
+            if r.attr("TargetMode").is_some_and(|m| m.eq_ignore_ascii_case("external"))
+                || !KEPT_RELS.iter().any(|(t, root)| *t == ty && *root == from_root)
+            {
+                continue;
+            }
+            let name = opc::resolve(&base, target);
+            if !keepable(&name) || out.iter().any(|k| k.name.eq_ignore_ascii_case(&name)) || out.len() >= 400 {
+                continue;
+            }
+            let Some(xml) = text(&name) else { continue };
+            out.push(KeptPart {
+                content_type: pkg.content_type(&name).unwrap_or_default(),
+                name: name.clone(),
+                xml,
+                rel_type: ty.to_string(),
+                from_root,
+            });
+            // The part's own relationships (customXml item → itemProps) and their targets.
+            let rp = opc::rels_path(&name);
+            if let Some(rels_xml) = text(&rp) {
+                for sub in pkg.rels(&name).items.iter().filter(|s| !s.external && keepable(&s.target)) {
+                    if let Some(x) = text(&sub.target)
+                        && !out.iter().any(|k| k.name.eq_ignore_ascii_case(&sub.target))
+                    {
+                        out.push(KeptPart {
+                            content_type: pkg.content_type(&sub.target).unwrap_or_default(),
+                            name: sub.target.clone(),
+                            xml: x,
+                            ..Default::default()
+                        });
+                    }
+                }
+                out.push(KeptPart { name: rp, xml: rels_xml, ..Default::default() });
+            }
+        }
+    }
+    out
 }
 
 /// Replace every `mc:AlternateContent` by the children of the branch we can read best.
@@ -202,7 +296,8 @@ fn resolve_mc_rels(el: &mut El, depth: usize, rels: Option<&Rels>) {
                     let choice = ac.children_named("Choice").find(|ch| {
                         let req_ok = ch.attr("Requires").unwrap_or("").split_whitespace().all(|r| SUPPORTED_MC.contains(&r));
                         // Ink content parts are not modelled; prefer their fallback picture.
-                        let modelled = !ch.elements().any(|e| e.is("contentPart"));
+                        let modelled = !ch.elements().any(|e| e.is("contentPart"))
+                            && (!ch.attr("Requires").unwrap_or("").contains("cx1") || chartex_readable(ch));
                         req_ok && modelled
                     });
                     let branch = choice.or_else(|| ac.child("Fallback"));
@@ -248,6 +343,47 @@ fn max_cnvpr(el: &El, m: &mut u32) {
             *m = (*m).max(id);
         }
     }
+}
+
+/// The theme of a `.thmx` theme file (its `officeDocument` is a theme part), or of the first
+/// master of a `.pptx` / `.potx`, with the media its format scheme uses (ids from 1).
+pub fn import_theme(bytes: &[u8]) -> Result<(deckcraft_model::theme::Theme, Vec<MediaItem>), PptxError> {
+    let pkg = Package::open(bytes)?;
+    let target = pkg.rels("").first_of("officeDocument").map(|r| r.target.clone());
+    let theme_path = match &target {
+        Some(t) if pkg.xml(t).is_some_and(|d| d.root.is("theme")) => t.clone(),
+        _ => {
+            // A presentation: its first master's theme.
+            let pres = target.unwrap_or_else(|| "ppt/presentation.xml".into());
+            let pres_doc = load(&pkg, &pres).ok_or_else(|| PptxError::NotPptx("neither a theme nor a presentation".into()))?;
+            let pres_part = Part::new(&pkg, &pres, &pres_doc);
+            let master = pres_doc
+                .root
+                .child("sldMasterIdLst")
+                .and_then(|l| l.children_named("sldMasterId").next())
+                .and_then(|m| pres_part.rels.target(m.attr("r:id").unwrap_or("")).map(String::from))
+                .or_else(|| pres_part.rels.all_of("slideMaster").next().map(|r| r.target.clone()))
+                .ok_or_else(|| PptxError::NotPptx("the presentation has no slide master".into()))?;
+            pkg.rels(&master).first_of("theme").map(|r| r.target.clone()).ok_or_else(|| PptxError::NotPptx("the slide master has no theme".into()))?
+        }
+    };
+    let doc = load(&pkg, &theme_path).ok_or_else(|| PptxError::NotPptx(format!("missing or unreadable {theme_path}")))?;
+    if !doc.root.is("theme") {
+        return Err(PptxError::NotPptx(format!("{theme_path} is not a theme part")));
+    }
+    let mut imp = Imp {
+        pkg: &pkg,
+        media: vec![],
+        media_by_part: HashMap::new(),
+        next: 0,
+        slide_by_part: HashMap::new(),
+        custom_show_names: HashMap::new(),
+        table_style_ids: Vec::new(),
+        vml_previews: HashMap::new(),
+    };
+    let part = Part::new(&pkg, &theme_path, &doc);
+    let theme = theme::read_theme(&mut imp, &part, &doc.root);
+    Ok((theme, imp.media))
 }
 
 pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
@@ -426,6 +562,7 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
             p.raw_ext = Some(kept);
         }
     }
+    p.tags = tags(&imp, &pres_part, pres_el);
     // Custom shows.
     if let Some(l) = pres_el.child("custShowLst") {
         for cs in l.children_named("custShow") {
@@ -476,6 +613,35 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
         }
         p.notes_master = Some(Arc::new(m));
     }
+    // Handout master (header, footer, date and slide number for printed handouts).
+    if let Some(r) = pres_part.rels.first_of("handoutMaster")
+        && let Some(d) = load(&pkg, &r.target)
+    {
+        let part = Part::new(&pkg, &r.target, &d);
+        let mut ctx = shapes::IdCtx::default();
+        let mut m = Master { id: MasterId(imp.alloc()), name: "Handout Master".into(), ..Default::default() };
+        if let Some(t) = part.rels.first_of("theme")
+            && let Some(td) = pkg.xml(&t.target)
+        {
+            let tp = Part::new(&pkg, &t.target, &td);
+            m.theme = theme::read_theme(&mut imp, &tp, &td.root);
+        } else if let Some(first) = p.masters.first() {
+            m.theme = first.theme.clone();
+        }
+        if let Some(csld) = d.root.child("cSld") {
+            if let Some(n) = csld.attr("name").filter(|s| !s.is_empty()) {
+                m.name = n.to_string();
+            }
+            m.background = background(&mut imp, &part, csld);
+            if let Some(tree) = csld.child("spTree") {
+                m.shapes = shapes::sp_tree(&mut imp, &part, &mut ctx, tree, 0);
+            }
+        }
+        if let Some(cm) = d.root.child("clrMap") {
+            m.color_map = color_map(cm);
+        }
+        p.handout_master = Some(Arc::new(m));
+    }
     // Document properties.
     if let Some(r) = root_rels.first_of("core-properties")
         && let Some(d) = pkg.xml(&r.target)
@@ -487,6 +653,8 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
     {
         p.props.company = d.root.child("Company").map(|c| c.text()).unwrap_or_default();
     }
+
+    p.kept_parts = kept_parts(&pkg, &pres_path);
 
     inherit_placeholder_geometry(&mut p);
     p.header_footer = header_footer(&p);
@@ -853,6 +1021,7 @@ fn read_slide(imp: &mut Imp, part: &Part, doc: &Doc, id: SlideId, layout: Layout
     let mut ctx = shapes::IdCtx::default();
     if let Some(csld) = root.child("cSld") {
         s.name = csld.attr("name").unwrap_or("").to_string();
+        s.tags = tags(imp, part, csld);
         s.background = background(imp, part, csld);
         if let Some(tree) = csld.child("spTree") {
             s.shapes = shapes::sp_tree(imp, part, &mut ctx, tree, 0);

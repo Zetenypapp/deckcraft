@@ -13,6 +13,16 @@ use crate::{DocState, Result, Selection, Session, Target, TextSel};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
+        cmd!(query "font.used", "Fonts in Presentation", [], None, "{} → [family] (theme fonts resolved)", has_doc, fonts_used),
+        cmd!(
+            "font.replace",
+            "Replace Fonts",
+            ["Home", "Editing", "Replace"],
+            None,
+            "{from, to} — every explicit use of family `from`, theme fonts included → {replaced}",
+            has_doc,
+            replace_font
+        ),
         cmd!(noundo "text.edit", "Edit Text", [], Some("Enter"), "{id?, at?: [paragraph, char], end?: bool, cell?: [row, col], notes?: bool}", has_slide, edit),
         cmd!(noundo "text.exit", "Stop Editing Text", [], None, "{}", has_doc, exit),
         cmd!("text.insert", "Type Text", [], None, "{text} (\\n = new paragraph, \\u000b = line break)", has_text, insert),
@@ -157,6 +167,7 @@ pub(crate) fn ctx_for<'a>(doc: &'a Presentation, sel: &Selection) -> Option<Ctx<
     match sel.target {
         Target::Slides => doc.slides.get(sel.slide).and_then(|s| Ctx::for_slide(doc, s)),
         Target::Master { master } => doc.masters.get(master).map(|m| Ctx::for_master(doc, m)),
+        t @ (Target::Handout | Target::NotesMaster) => crate::page_master(doc, t).map(|m| Ctx::for_master(doc, m)),
         Target::Layout { master, layout } => doc.masters.get(master).and_then(|m| m.layouts.get(layout).map(|l| Ctx::for_layout(doc, m, l))),
     }
 }
@@ -181,11 +192,17 @@ pub fn layout_for(st: &DocState, t: &TextSel) -> Option<deckcraft_text::TextLayo
 
 /// The insertion point on the slide: its line from top to bottom, in slide coordinates (flips and
 /// vertical text as drawn). Text with no paragraph yet (a placeholder about to be typed in) is
-/// measured as one empty paragraph, so the caret shows where typing begins. `None` for notes and
-/// table cells, which aren't laid out on the slide here.
+/// measured as one empty paragraph, so the caret shows where typing begins. `None` for notes,
+/// which are an egui text field.
 pub fn caret_line(st: &DocState, t: &TextSel) -> Option<(deckcraft_geom::Point, deckcraft_geom::Point)> {
-    if t.notes || t.cell.is_some() {
+    if t.notes {
         return None;
+    }
+    if let Some((row, col)) = t.cell {
+        let placed = cell_on_slide(st, t.shape, row, col)?;
+        let aff = if t.at_line_end() { deckcraft_text::Affinity::Upstream } else { deckcraft_text::Affinity::Downstream };
+        let (cx, top, bot) = placed.layout.caret_drawn(deckcraft_text::Pos { para: t.caret.0, ch: t.caret.1 }, aff)?;
+        return Some((placed.to_slide * deckcraft_geom::Point::new(cx, top), placed.to_slide * deckcraft_geom::Point::new(cx, bot)));
     }
     let sh = st.shape(t.shape)?;
     let ctx = ctx_for(&st.doc, &st.selection)?;
@@ -487,20 +504,35 @@ fn commit(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Underlines under an input method's composition (#101), in slide coordinates: `(from, to,
-/// thick)` per line, thick under the part being converted. Empty without a composition or when
-/// the edited text isn't laid out on the slide (notes, table cells).
+/// thick)` per line, thick under the part being converted. Empty without a composition, or for
+/// notes (an egui text field draws its own composition).
 pub fn composition_underlines(st: &DocState) -> Vec<(deckcraft_geom::Point, deckcraft_geom::Point, bool)> {
     let (Some(c), Some(t)) = (&st.composition, &st.selection.text) else { return vec![] };
+    if t.notes {
+        return vec![];
+    }
+    if let Some((row, col)) = t.cell {
+        let Some(placed) = cell_on_slide(st, t.shape, row, col) else { return vec![] };
+        return underline_segments(&placed.layout, placed.to_slide, c);
+    }
     let Some(sh) = st.shape(t.shape) else { return vec![] };
     let Some(l) = layout_for(st, t) else { return vec![] };
     let x = xfrm_of(&st.doc, &st.selection, sh);
     let tr = deckcraft_render::shape_geometry(sh, x.w, x.h).text_rect;
     let m = deckcraft_render::text_transform(x.affine(), tr, l.rotation);
+    underline_segments(&l, m, c)
+}
+
+fn underline_segments(
+    layout: &deckcraft_text::TextLayout,
+    to_slide: deckcraft_geom::Affine,
+    c: &crate::Composition,
+) -> Vec<(deckcraft_geom::Point, deckcraft_geom::Point, bool)> {
     let pos = |ch: usize| deckcraft_text::Pos { para: c.start.0, ch: c.start.1 + ch };
     let mut out = vec![];
     let mut add = |a: usize, b: usize, thick: bool| {
-        for (x0, x1, y) in l.composition_underlines(pos(a), pos(b)) {
-            out.push((m * deckcraft_geom::Point::new(x0, y), m * deckcraft_geom::Point::new(x1, y), thick));
+        for (x0, x1, y) in layout.composition_underlines(pos(a), pos(b)) {
+            out.push((to_slide * deckcraft_geom::Point::new(x0, y), to_slide * deckcraft_geom::Point::new(x1, y), thick));
         }
     };
     add(0, c.len, false);
@@ -508,6 +540,35 @@ pub fn composition_underlines(st: &DocState) -> Vec<(deckcraft_geom::Point, deck
         add(a, b.min(c.len), true);
     }
     out
+}
+
+/// A table cell's text laid out the way it is drawn, mapped into slide coordinates.
+fn cell_on_slide(st: &DocState, id: ShapeId, row: usize, col: usize) -> Option<CellText> {
+    let sh = st.shape(id)?;
+    let ShapeKind::Table(tb) = &sh.kind else { return None };
+    let cell = tb.cell(row, col)?;
+    let ctx = ctx_for(&st.doc, &st.selection)?;
+    let heights = super::table_drawn_heights(&st.doc, &st.selection, tb);
+    let rect = deckcraft_render::table_cell_rects(tb, &heights).into_iter().find(|(r, c, _)| *r == row && *c == col)?.2;
+    let mut body = deckcraft_render::table_cell_body(&ctx, tb, row, col, cell);
+    if body.paragraphs.is_empty() {
+        body.paragraphs.push(deckcraft_model::text::Paragraph::default());
+    }
+    let tmp = deckcraft_model::Shape { text: Some(body.clone()), ..Default::default() };
+    let layout = deckcraft_text::layout(
+        &ctx,
+        &tmp,
+        &body,
+        &deckcraft_text::Opts { rect, fields: &deckcraft_text::NoFields, prompt_color: None, no_shrink: false },
+    );
+    let x = xfrm_of(&st.doc, &st.selection, sh);
+    let to_slide = deckcraft_render::text_transform(x.affine(), rect, layout.rotation);
+    Some(CellText { layout, to_slide })
+}
+
+struct CellText {
+    layout: deckcraft_text::TextLayout,
+    to_slide: deckcraft_geom::Affine,
 }
 
 fn insert(s: &mut Session, p: &Value) -> Result<Value> {
@@ -804,8 +865,9 @@ pub(crate) fn format_run(s: &mut Session, f: &(dyn Fn(&mut RunProps) + Send + Sy
 }
 
 /// What `format_run` formats while editing: the selection, or for a bare caret the word it's in
-/// (without its trailing space). Empty when the caret is at a word boundary.
-fn format_range(st: &DocState, t: &TextSel) -> (Pos, Pos) {
+/// (without its trailing space). Empty when the caret is at a word boundary. Insert Hyperlink
+/// edits this same span, so the dialog reads it too.
+pub fn format_range(st: &DocState, t: &TextSel) -> (Pos, Pos) {
     let body = body_of(st, t).cloned().unwrap_or_default();
     let (mut a, mut b) = t.ordered();
     if a == b {
@@ -913,4 +975,72 @@ pub(crate) fn format_body(s: &mut Session, f: &(dyn Fn(&mut deckcraft_model::tex
         fit_text_box(s, id)?;
     }
     ok()
+}
+
+fn fonts_used(s: &mut Session, _: &Value) -> Result<Value> {
+    let mut v = crate::fonts::used_fonts(&s.doc()?.doc);
+    v.sort_by_key(|f| f.to_lowercase());
+    Ok(json!(v))
+}
+
+fn replace_font(s: &mut Session, p: &Value) -> Result<Value> {
+    let from = str_param(p, "from").map(str::trim).filter(|x| !x.is_empty()).ok_or_else(|| bad("font.replace", "missing `from`"))?.to_string();
+    let to = str_param(p, "to").map(str::trim).filter(|x| !x.is_empty()).ok_or_else(|| bad("font.replace", "missing `to`"))?.to_string();
+    if to.len() > 256 || to.chars().any(char::is_control) {
+        return Err(bad("font.replace", "`to` is not a font name"));
+    }
+    // Count on a copy first so a replace that finds nothing leaves no undo step.
+    let mut probe = (*s.doc()?.doc).clone();
+    if crate::fonts::replace_font(&mut probe, &from, &to) == 0 {
+        return Ok(json!({"replaced": 0}));
+    }
+    let n = s.edit(|doc, _| Ok(crate::fonts::replace_font(doc, &from, &to)))?;
+    let st = s.doc_mut()?;
+    st.missing_fonts = crate::fonts::missing_fonts(&st.doc);
+    Ok(json!({"replaced": n}))
+}
+
+#[cfg(test)]
+mod replace_font_tests {
+    use serde_json::json;
+
+    use crate::Session;
+
+    fn fonts(s: &mut Session) -> Vec<String> {
+        serde_json::from_value(s.execute("font.used", &json!({})).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn replaces_runs_tables_notes_and_theme_and_undoes() {
+        let mut s = Session::with_new();
+        s.execute("slide.new", &json!({"layout": "titleAndContent", "title": "T", "body": "B"})).unwrap();
+        let theme = s.doc().unwrap().doc.masters[0].theme.fonts.minor.latin.clone();
+        s.execute("insert.textBox", &json!({"rect": [10, 10, 200, 50], "text": "Hello"})).unwrap();
+        s.execute("text.exit", &json!({})).unwrap();
+        s.execute("format.font", &json!({"family": "Comic Neue"})).unwrap();
+        assert!(fonts(&mut s).iter().any(|f| f == "Comic Neue"), "{:?}", fonts(&mut s));
+        let r = s.execute("font.replace", &json!({"from": "comic neue", "to": "Lato"})).unwrap();
+        assert!(r["replaced"].as_u64().unwrap() >= 1, "{r}");
+        let used = fonts(&mut s);
+        assert!(!used.iter().any(|f| f == "Comic Neue") && used.iter().any(|f| f == "Lato"), "{used:?}");
+        // The theme's body font is replaced too, so placeholders follow.
+        s.execute("font.replace", &json!({"from": theme, "to": "Lato"})).unwrap();
+        assert_eq!(s.doc().unwrap().doc.masters[0].theme.fonts.minor.latin, "Lato");
+        assert!(s.doc().unwrap().doc.validate().is_empty());
+        s.execute("edit.undo", &json!({})).unwrap();
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(fonts(&mut s).iter().any(|f| f == "Comic Neue"));
+    }
+
+    #[test]
+    fn nothing_to_replace_is_no_undo_step_and_bad_names_fail() {
+        let mut s = Session::with_new();
+        let undo = s.doc().unwrap().history.undo.len();
+        assert_eq!(s.execute("font.replace", &json!({"from": "Nope Sans", "to": "Inter"})).unwrap()["replaced"], 0);
+        assert_eq!(s.execute("font.replace", &json!({"from": "+mn-lt", "to": "Inter"})).unwrap()["replaced"], 0);
+        assert_eq!(s.doc().unwrap().history.undo.len(), undo);
+        assert!(s.execute("font.replace", &json!({"from": "", "to": "Inter"})).is_err());
+        assert!(s.execute("font.replace", &json!({"from": "Inter", "to": "a\nb"})).is_err());
+        assert!(s.execute("font.replace", &json!({"from": "Inter"})).is_err());
+    }
 }

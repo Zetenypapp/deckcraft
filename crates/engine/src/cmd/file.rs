@@ -8,7 +8,16 @@ use crate::{DocState, EngineError, Result, Session};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        cmd!(noundo "file.new", "New Presentation", ["File"], Some("Cmd+N"), "{theme?: name, size?: [w,h] pt, blank?: bool} (missing ones: Settings › New Presentations)", always, new),
+        cmd!(
+            noundo "file.new",
+            "New Presentation",
+            ["File"],
+            Some("Cmd+N"),
+            "{theme?: name, template?: starter name, size?: [w,h] pt, blank?: bool} (missing ones: Settings › New Presentations)",
+            always,
+            new
+        ),
+        cmd!(query "file.templates", "Starter Templates", [], None, "{} → [{name, summary, theme, slides}]", always, templates),
         cmd!(noundo "file.open", "Open…", ["File"], Some("Cmd+O"), "{path}", always, open),
         cmd!(noundo "file.openBytes", "Open Data", [], None, "{name, data: base64}", always, open_bytes),
         cmd!(noundo "file.save", "Save", ["File"], Some("Cmd+S"), "{path?, format?: deckcraft|pptx}", has_doc, save),
@@ -58,26 +67,58 @@ fn theme_named(name: &str) -> Option<deckcraft_model::Theme> {
     deckcraft_model::theme::builtin_themes().into_iter().find(|t| t.name.eq_ignore_ascii_case(name))
 }
 
-fn new(s: &mut Session, p: &Value) -> Result<Value> {
-    // What isn't given comes from Settings › New Presentations.
-    let prefs = &s.prefs;
-    let mut theme = str_param(p, "theme").or(Some(prefs.new_theme.as_str())).and_then(theme_named).unwrap_or_default();
-    let font = prefs.new_font.trim();
-    if !font.is_empty() && font.len() <= 128 {
-        theme.fonts.major.latin = font.to_string();
-        theme.fonts.minor.latin = font.to_string();
-    }
-    let default_size = if prefs.new_size.eq_ignore_ascii_case("standard") { defaults::STANDARD } else { defaults::WIDE };
-    let size = p
-        .get("size")
+fn slide_size(p: &Value, default: deckcraft_geom::Size) -> deckcraft_geom::Size {
+    p.get("size")
         .and_then(Value::as_array)
         .and_then(|a| Some(deckcraft_geom::Size::new(a.first()?.as_f64()?, a.get(1)?.as_f64()?)))
         .filter(|s| s.width >= 1.0 && s.height >= 1.0 && s.width < 5000.0 && s.height < 5000.0)
-        .unwrap_or(default_size);
-    let doc = defaults::blank_presentation(size, theme, !bool_or(p, "blank", false));
+        .unwrap_or(default)
+}
+
+fn templates(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Ok(json!({
+        "templates": crate::templates::starters().iter().map(|t| json!({
+            "name": t.name,
+            "summary": t.summary,
+            "theme": t.theme,
+            "slides": t.slides.len(),
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+fn new(s: &mut Session, p: &Value) -> Result<Value> {
+    let template = str_param(p, "template").filter(|t| !t.is_empty());
+    let theme_name = str_param(p, "theme").filter(|t| !t.is_empty());
+    if template.is_some() && theme_name.is_some() {
+        return Err(bad("file.new", "pass `theme` or `template`, not both"));
+    }
+    if template.is_some() && bool_or(p, "blank", false) {
+        return Err(bad("file.new", "a template is not a blank presentation"));
+    }
+    // What isn't given comes from Settings › New Presentations.
+    let prefs = &s.prefs;
+    let size = slide_size(p, if prefs.new_size.eq_ignore_ascii_case("standard") { defaults::STANDARD } else { defaults::WIDE });
+    let (doc, template_name) = if let Some(name) = template {
+        let doc = crate::templates::build(name, size)?;
+        let chosen = crate::templates::find(name).map(|t| t.name);
+        (doc, chosen)
+    } else {
+        let mut theme = theme_name.or(Some(prefs.new_theme.as_str())).and_then(theme_named).unwrap_or_default();
+        let font = prefs.new_font.trim();
+        if !font.is_empty() && font.len() <= 128 {
+            theme.fonts.major.latin = font.to_string();
+            theme.fonts.minor.latin = font.to_string();
+        }
+        (defaults::blank_presentation(size, theme, !bool_or(p, "blank", false)), None)
+    };
+    let slides = doc.slides.len();
     let title = s.next_untitled();
     let i = s.add_document(DocState::new(doc, None, title));
-    Ok(json!({"document": i}))
+    let mut out = json!({"document": i, "slides": slides});
+    if let Some(name) = template_name {
+        out["template"] = json!(name);
+    }
+    Ok(out)
 }
 
 /// Recognise and read presentation bytes (native, PPTX).
@@ -348,9 +389,18 @@ pub fn image_scale(doc: &Presentation, scale: f64) -> f64 {
 
 /// Render slide `index` (current when absent) to PNG bytes.
 pub fn render_png(doc: &Presentation, index: usize, scale: f64, edit: bool) -> (Vec<u8>, u32, u32) {
-    let img =
-        deckcraft_render::render_slide(doc, index, &deckcraft_render::RenderOpts { scale: image_scale(doc, scale), edit, ..Default::default() });
-    (img.to_png(), img.width, img.height)
+    let scale = image_scale(doc, scale);
+    let img = deckcraft_render::render_slide(doc, index, &deckcraft_render::RenderOpts { scale, edit, ..Default::default() });
+    (img.to_png_at(deckcraft_render::dpi_for_scale(scale)), img.width, img.height)
+}
+
+fn finite_scale(scale: f64) -> f64 {
+    if scale.is_finite() { scale.clamp(0.01, 16.0) } else { 1.0 }
+}
+
+fn picture_bytes(img: &deckcraft_render::Image, format: &str, scale: f64) -> Vec<u8> {
+    let dpi = deckcraft_render::dpi_for_scale(scale);
+    if format == "png" { img.to_png_at(dpi) } else { img.to_jpeg_at(92, Some(dpi)) }
 }
 
 fn render(s: &mut Session, p: &Value) -> Result<Value> {
@@ -390,7 +440,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_param(p, "path").ok_or_else(|| bad("file.export", "missing `path`"))?.to_string();
     let format = str_param(p, "format").unwrap_or(format_for_path(&path)).to_string();
     let st = s.doc()?;
-    let scale = f64_or(p, "scale", 2.0);
+    let scale = finite_scale(f64_or(p, "scale", 2.0));
     match format.as_str() {
         "png" | "jpeg" | "jpg" => {
             let slides: Vec<usize> = match usize_param(p, "slide") {
@@ -406,7 +456,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
             let mut written = vec![];
             for (k, i) in slides.iter().enumerate() {
                 let img = deckcraft_render::render_slide(&st.doc, *i, &deckcraft_render::RenderOpts { scale, ..Default::default() });
-                let bytes = if format == "png" { img.to_png() } else { img.to_jpeg(92) };
+                let bytes = picture_bytes(&img, &format, scale);
                 let out = if slides.len() == 1 {
                     path.clone()
                 } else {

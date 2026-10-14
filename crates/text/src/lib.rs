@@ -1536,6 +1536,12 @@ fn tab_advance(x: f64, stops: &[Tab], default_tab: f64, seg: (f64, f64)) -> f64 
     (next - x).max(1.0)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times `layout_scaled` ran on this thread (tests count autofit's passes).
+    pub(crate) static LAYOUT_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Lay out a shape's text body.
 pub fn layout(ctx: &Ctx, shape: &Shape, body: &TextBody, opts: &Opts) -> TextLayout {
     let bp = resolve::body(ctx, shape);
@@ -1558,9 +1564,16 @@ pub fn layout(ctx: &Ctx, shape: &Shape, body: &TextBody, opts: &Opts) -> TextLay
         && l.overflow
         && !saved
     {
+        // Text that overflows even at the smallest scale gets that scale: every larger one
+        // overflows too, so searching would only lay it out a dozen more times (seconds for a
+        // body of tens of thousands of paragraphs, on every redraw of the slide).
+        let smallest = layout_scaled(ctx, shape, body, &bp, opts, 0.1, 0.2);
+        if smallest.overflow {
+            return smallest;
+        }
         // Binary search the largest scale that fits (steps like 90%, 80%… with line reduction).
         let (mut lo, mut hi) = (0.1_f64, scale0);
-        let mut best = None;
+        let mut best = Some(smallest);
         for _ in 0..12 {
             let mid = (lo + hi) / 2.0;
             let red: f64 = ((1.0 - mid) * 0.8_f64).min(0.2).max(reduce0);
@@ -1572,13 +1585,17 @@ pub fn layout(ctx: &Ctx, shape: &Shape, body: &TextBody, opts: &Opts) -> TextLay
                 best = Some(t);
             }
         }
-        l = best.unwrap_or_else(|| layout_scaled(ctx, shape, body, &bp, opts, 0.1, 0.2));
+        if let Some(b) = best {
+            l = b;
+        }
     }
     l
 }
 
 #[allow(clippy::too_many_arguments)]
 fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts: &Opts, scale: f64, reduce: f64) -> TextLayout {
+    #[cfg(test)]
+    LAYOUT_PASSES.with(|n| n.set(n.get() + 1));
     let r = opts.rect;
     let vert = bp.vert.unwrap_or(TextDir::Horizontal);
     // East Asian vertical text: CJK stands upright in text turned a quarter turn; stacked text
@@ -1623,6 +1640,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
     let mut prev_after = 0.0;
     // How far the last line's full pitch reaches past the text (exact spacing; see below).
     let mut tail = 0.0;
+    let first_last = bp.space_first_last.unwrap_or(false);
     let mut shaped_paras: Vec<ParaShaped> = Vec::with_capacity(body.paragraphs.len());
     for (pi, para) in body.paragraphs.iter().enumerate() {
         let lvl = para.level.min(8) as usize;
@@ -1666,7 +1684,8 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
         let first_w = (col_w - first_x - mr).max(1.0);
         let rest_w = (col_w - rest_x - mr).max(1.0);
         let raw = break_lines(p, first_w, rest_w, wrap, &tabs, props.default_tab.unwrap_or(72.0), first_x, rest_x);
-        let before = if pi == 0 { 0.0 } else { spacing_pts(props.space_before, p.lead_size) };
+        // The first paragraph's space before counts only when the body says so.
+        let before = if pi == 0 && !first_last { 0.0 } else { spacing_pts(props.space_before, p.lead_size) };
         y += before.max(0.0) + prev_after;
         let first_line_idx = all_lines.len();
         for (li, rl) in raw.iter().enumerate() {
@@ -1850,8 +1869,9 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
         out.para_lines.push((first_line_idx, raw.len()));
         prev_after = spacing_pts(props.space_after, p.lead_size).max(0.0);
     }
-    // The text ends at the last line's descent under exact spacing.
-    let total = (y - tail).max(0.0);
+    // The text ends at the last line's descent under exact spacing; the last paragraph's space
+    // after counts only when the body says so.
+    let total = (y - tail).max(0.0) + if first_last { prev_after } else { 0.0 };
     out.content_height = total;
     // Where column `c` starts: from the left, or from the right with `rtlCol` (PowerPoint puts the
     // first column on the right).

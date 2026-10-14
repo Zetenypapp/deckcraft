@@ -126,6 +126,17 @@ pub fn blip_fill(imp: &mut Imp, part: &Part, bf: &El) -> Option<PictureFill> {
     let media = blip.and_then(|b| media_ref(imp, part, b));
     let media = media?;
     let mut pf = PictureFill { media, upright: !bf.bool("rotWithShape").unwrap_or(true), ..Default::default() };
+    if let Some(layer) = blip.and_then(|b| b.child("extLst")).and_then(|x| x.find("imgLayer"))
+        && let Some(effect) = layer
+            .elements()
+            .filter(|e| e.local() == "imgEffect")
+            .flat_map(|e| e.elements())
+            .map(|e| e.local().to_string())
+            .find(|n| n.starts_with("artistic"))
+        && let Some(original) = media_ref(imp, part, layer)
+    {
+        pf.artistic = Some(deckcraft_model::style::Artistic { effect, original });
+    }
     if let Some(b) = blip {
         for e in b.elements() {
             match e.local() {
@@ -320,6 +331,7 @@ pub fn body_pr(b: &El) -> BodyProps {
         col_spacing: pt(b, "spcCol"),
         rtl_col: b.bool("rtlCol"),
         upright: b.bool("upright"),
+        space_first_last: b.bool("spcFirstLastPara"),
         ..Default::default()
     };
     for e in b.elements() {
@@ -633,6 +645,9 @@ mod tests {
         assert_eq!(b.vert, Some(TextDir::Vertical270));
         assert_eq!(b.columns, Some(2));
         assert_eq!(b.autofit, Some(AutoFit::Shrink { font_scale: 0.625, line_reduction: 0.2 }));
+        assert_eq!(b.space_first_last, None);
+        let d = parse(br#"<a:bodyPr spcFirstLastPara="1"/>"#).unwrap();
+        assert_eq!(body_pr(&d.root).space_first_last, Some(true));
         // mongolianVert is its own direction (PowerPoint runs its lines left to right) and is
         // written back as it was read.
         let d = parse(br#"<a:bodyPr vert="mongolianVert"/>"#).unwrap();

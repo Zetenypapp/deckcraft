@@ -11,7 +11,11 @@ use crate::theme::{self, Tokens};
 pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let in_master = app.session.active().is_some_and(|d| d.selection.target != Target::Slides);
-    egui::Panel::left("thumbs")
+    // Handout Master view has one page and no thumbnails, as in PowerPoint.
+    if app.session.active().is_some_and(|d| d.selection.target.is_page_master()) {
+        return;
+    }
+    let panel = egui::Panel::left("thumbs")
         .resizable(true)
         .default_size(app.ui.thumbs_width)
         .size_range(150.0..=420.0)
@@ -28,6 +32,10 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                 ui.add_space(20.0);
             });
         });
+    // Focus follows the last press: inside the pane keeps it, anywhere else (canvas, ribbon) drops it.
+    if let Some(pos) = ui.input(|i| if i.pointer.primary_pressed() { i.pointer.interact_pos() } else { None }) {
+        app.slides_focused = panel.response.rect.contains(pos);
+    }
 }
 
 fn list(app: &mut SlideApp, ui: &mut Ui) {

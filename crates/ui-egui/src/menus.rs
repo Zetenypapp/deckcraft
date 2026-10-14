@@ -10,9 +10,14 @@ use crate::theme::{self, Tokens};
 /// Shortcuts the UI handles itself (views, show, zoom, palette, file dialogs). True when consumed.
 pub fn ui_shortcut(app: &mut SlideApp, key: egui::Key, m: Mods) -> bool {
     use egui::Key::*;
+    if key == A && m.cmd && !m.shift && !m.alt && app.slides_list_focused() {
+        // The engine can't see which pane has focus, so the UI says so through the scope param.
+        let _ = app.run("edit.selectAll", json!({"scope": "slides"}));
+        return true;
+    }
     let id = match (key, m.cmd, m.shift, m.alt) {
         (F5, _, false, _) => {
-            app.start_show(0, false);
+            app.start_show(app.show_start_index(), false);
             return true;
         }
         (F5, _, true, _) | (Enter, true, false, false) => {
@@ -21,7 +26,7 @@ pub fn ui_shortcut(app: &mut SlideApp, key: egui::Key, m: Mods) -> bool {
             return true;
         }
         (Enter, true, true, _) => {
-            app.start_show(0, false);
+            app.start_show(app.show_start_index(), false);
             return true;
         }
         (S, true, false, false) => {
@@ -81,9 +86,10 @@ fn palette_items(session: &deckcraft_engine::Session, q: &str) -> Vec<(String, S
     let mut items: Vec<(String, String, Option<&'static str>)> = session
         .commands()
         .into_iter()
-        .filter(|c| c.enabled && !crate::UI_COMMANDS.iter().any(|u| u.1 == c.label))
+        // Commands that need a path or other value fail when the palette runs them with `{}`.
+        .filter(|c| c.enabled && !crate::UI_COMMANDS.iter().any(|u| u.1 == c.label) && !deckcraft_engine::cmd::needs_arguments(c.params))
         .map(|c| (c.id.to_string(), c.label.to_string(), c.shortcut))
-        .chain(crate::UI_COMMANDS.iter().map(|c| (c.0.to_string(), c.1.to_string(), c.2)))
+        .chain(crate::UI_COMMANDS.iter().filter(|c| !deckcraft_engine::cmd::needs_arguments(c.3)).map(|c| (c.0.to_string(), c.1.to_string(), c.2)))
         .filter(|(id, label, _)| q.is_empty() || label.to_lowercase().contains(q) || id.to_lowercase().contains(q))
         .collect();
     items.sort_by_key(|(_, l, _)| !l.to_lowercase().starts_with(q));
@@ -201,14 +207,19 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("Slide Show", "show.start"),
                 ("-", ""),
                 ("Slide Master", "view.slideMaster"),
+                ("Handout Master", "view.handoutMaster"),
+                ("Notes Master", "view.notesMaster"),
                 ("-", ""),
                 ("Ruler", "view.ruler"),
                 ("Gridlines", "view.gridlines"),
                 ("Guides", "view.guides"),
                 ("-", ""),
+                ("Zoom…", "view.zoomDialog"),
                 ("Zoom In", "view.zoomIn"),
                 ("Zoom Out", "view.zoomOut"),
                 ("Fit to Window", "view.fit"),
+                ("-", ""),
+                ("New Window", "view.newWindow"),
             ],
         ),
         (
@@ -226,6 +237,8 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("Table…", "insert.table"),
                 ("Chart", "insert.chart"),
                 ("Picture from File…", "app.insertPictureDialog"),
+                ("Photo Album…", "insert.photoAlbum"),
+                ("Edit Photo Album…", "insert.photoAlbumEdit"),
                 ("Audio from File…", "app.insertAudioDialog"),
                 ("Video from File…", "app.insertVideoDialog"),
             ],
@@ -292,7 +305,11 @@ mod tests {
             assert_eq!(exports[0].0, "app.exportDialog");
         }
         // Open…, Save As…, Audio/Video from File… and Notes had the same duplicates: every UI command is the only entry with its label.
-        for (id, label, _, _) in crate::UI_COMMANDS {
+        // Commands that need a value (Set Zoom's percent) are left out of the palette.
+        for (id, label, _, params) in crate::UI_COMMANDS {
+            if deckcraft_engine::cmd::needs_arguments(params) {
+                continue;
+            }
             let same: Vec<_> = palette_items(&session, &label.to_lowercase()).into_iter().filter(|(_, l, _)| l == label).collect();
             assert_eq!(same.len(), 1, "{label}");
             assert_eq!(same[0].0, *id, "{label}");

@@ -4,6 +4,19 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (media remainder no longer lists icons: Insert › Icons is a Lucide stroke set; percentages unchanged; previous: minor, hours to ~95% per audience added) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (227 commands; breadth stays 79%, ready stays ~55%; previous: minor, hours to ~95% per audience) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (228 commands; previous/next comment; breadth stays 79%; previous: minor, hours to ~95%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (six original starter decks; ecosystem stays ~25% until the gallery is large; previous: minor, hours to ~95% per audience added; ready 56% → 55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (automation 227 commands; breadth stays 79%, ready ~55%; previous: minor, hours to ~95% per audience) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (automation 228 commands; breadth stays 79%, ready ~55%; previous: trivial, automation 227 commands) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Colors noted under what works today; percentages unchanged; previous: hours to ~95% per audience) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Fonts noted under what works today; percentages unchanged; previous: hours to ~95% per audience) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Zoom dialog; breadth stays 79%; previous: minor, hours to ~95%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (slide show lists See All Slides and zoom; breadth stays 79%; previous: minor, hours to ~95% per audience) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (slide show lists presenter timer pause/reset, clock and notes size; breadth stays 79%; previous: trivial, See All Slides and zoom) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (slide show plays a custom show; breadth stays 79%; previous: trivial, presenter timer) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (go to slide shows the typed number; breadth stays 79%; previous: trivial, custom show playback) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** trivial (essentials discount no longer cites the palette Export failure, #79; percentages unchanged; previous: minor, hours to ~95% per audience) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; percentages unchanged; previous: hours to ~95% per audience, ready ~55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers; automation counted at 236 commands; the menu measurement and the d556ff9 snapshot still count 226; percentages unchanged; previous: hours to ~95% per audience, ready 56% → 55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The authoritative answer to "how close is DeckCraft to PowerPoint, and how much work is left?".
 [ROADMAP.md](../ROADMAP.md) summarizes it; [gaps.md](gaps.md) itemizes every shortfall;
@@ -14,7 +27,7 @@ number.
 
 | Number | Value | Kind |
 |---|---|---|
-| **Feature breadth** (weighted checklist) | **79%** over 191 features (P0 92%, P1 75%, P2 36%) | **measured**: `cargo xtask parity` formula over [parity-checklist.md](parity-checklist.md), rows re-scored 2026-10-10 |
+| **Feature breadth** (weighted checklist) | **79%** over 191 features (P0 92%, P1 75%, P2 39%) | **measured**: `cargo xtask parity` formula over [parity-checklist.md](parity-checklist.md) |
 | Menu-bar coverage | **59%** (128 of 217 app-specific PowerPoint menu items have a DeckCraft command or UI label of the same name) | **measured** (heuristic lower bound): script matching the 2026-10-07 PowerPoint menu dump against the 226 engine command labels and the UI's strings; excludes the app, Window and Help menus and the subtitle language lists |
 | **Ready for real work** | **~55%** | **estimated**: weighted dimension table below (was ~56% until the features row was recomputed from written area weights) |
 | **Mainstream practitioner** | **~53%** | **estimated**: [method below](#mainstream-practitioner-and-essentials-user) |
@@ -75,7 +88,7 @@ The weights are what those users actually depend on, written down so the total c
 | Hardware | 5% | ~40% | 25–45 | [hardware-parity.md](hardware-parity.md) | GPU-composited window (wgpu), but CPU slide raster, software-only video decode, presenter view not placed on the second display, no pen pressure, no pinch zoom |
 | Platforms | 5% | ~80% | 5–10 | [ROADMAP.md](../ROADMAP.md) | Ahead in reach: macOS, Windows x64/x86/arm64, Linux (5 formats), FreeBSD and the web, all from one release workflow. Held back by the Windows GPU crashes and Linux/Windows clipboard gaps |
 | Localization | 5% | ~8% | 55–90 + native review | [localization-parity.md](localization-parity.md) | English only; no string catalog. PowerPoint for Mac ships 26 languages. Bidi and Arabic shaping in slide text exist |
-| Ecosystem (templates, add-ins) | 3% | ~25% | 10–20 | [gaps.md](gaps.md) | 8 original themes vs PowerPoint's large template gallery; no add-ins or VBA (out of scope by policy) |
+| Ecosystem (templates, add-ins) | 3% | ~25% | 10–20 | [gaps.md](gaps.md) | 8 original themes and 6 original starter decks; PowerPoint's large template gallery remains; no add-ins or VBA (out of scope by policy) |
 | AI features | 2% | ~10% | 20–40 (owner decision on models) | [gaps.md](gaps.md) | No Designer, Copilot, Speaker Coach, live subtitles or Translate (all Microsoft cloud services). Agents drive every command over MCP instead |
 | **Total** | 100% | **~55%** (Σ weight × ready = 55.3) | **~365–650** | | |
 | Automation (✱, not weighted) | | ahead | 0 | [mcp.md](mcp.md), [control-protocol.md](control-protocol.md) | Every command is scriptable from the CLI, a JSON control channel and MCP, headless or against the running app; PowerPoint for Mac has AppleScript and VBA only |
@@ -153,7 +166,7 @@ mainstream number leaves out.
 | Discount | Factor | Evidence |
 |---|---:|---|
 | Launch and stability | ×0.90 | Some Windows PCs can't start the app (#40, #59), and the workaround is an environment variable; Close loses work (#60) |
-| Discoverability and UI clarity | ×0.95 | Familiar ribbon and tabs; no native menu bar, start-screen glitches, a command palette whose default entry fails (#79) |
+| Discoverability and UI clarity | ×0.95 | Familiar ribbon and tabs; no native menu bar, start-screen glitches |
 | Opening files people send them | ×0.90 | `.pptx` opens, but real decks are untested and EMF pictures and PowerPoint icons can come in blank (#56) |
 
 80.1 × 0.90 × 0.95 × 0.90 = **61.6 → ~62%**.
@@ -185,20 +198,23 @@ it is the Features row of the dimension table. Automation and Platforms are scor
 | Application shell | 5 | 71% | ~55% | 8–14 | No native macOS menu bar, thin start screen (templates, recent), one window per presentation missing | [ui-parity.md](ui-parity.md) |
 | Files (commands) | 4 | 69% | ~50% | see file formats | Print, reuse slides, passwords, legacy and macro formats | [file-format-parity.md](file-format-parity.md) |
 | Slides and sections | 6 | 90% | ~85% | 3–5 | Zoom (summary/section/slide), copying slides between decks keeps formatting only partly | [parity-checklist.md](parity-checklist.md) |
-| Views | 4 | 90% | ~80% | 3–6 | Snap to grid and grid options, New Window | [ui-parity.md](ui-parity.md) |
+| Views | 4 | 90% | ~80% | 3–6 | Snap to grid and grid options, Arrange All | [ui-parity.md](ui-parity.md) |
 | Masters and themes | 7 | 85% | ~70% | 8–14 | Notes and Handout masters, theme variants, `.thmx`, effect schemes | [parity-checklist.md](parity-checklist.md) |
 | Shapes | 7 | 86% | ~75% | 8–14 | Edit points, warp adjust handles, WordArt depth | [ui-parity.md](ui-parity.md) |
+| Views | 4 | 90% | ~80% | 3–6 | Snap to grid and grid options, New Window | [ui-parity.md](ui-parity.md) |
+| Masters and themes | 7 | 85% | ~70% | 8–14 | Notes and Handout masters, theme variants, `.thmx` | [parity-checklist.md](parity-checklist.md) |
+| Shapes | 7 | 86% | ~75% | 8–14 | Edit points, text warp, WordArt depth | [ui-parity.md](ui-parity.md) |
 | Format (fill, line, effects) | 6 | 81% | ~65% | 8–14 | Format Shape pane depth, bevel and 3-D, picture/texture fill options | [ui-parity.md](ui-parity.md) |
 | Arrange | 3 | 100% | ~90% | 1–2 | Align to slide vs selected as a menu choice, More Rotation Options | [ui-parity.md](ui-parity.md) |
 | Text | 15 | 80% | ~62% | 18–30 | Font weights beyond Regular/Bold/Italic (#69), Tab in text boxes (#78), IME, true vertical CJK, dictionaries, AutoCorrect, thesaurus, equations (PR #55 open) | [localization-parity.md](localization-parity.md) |
 | Tables | 5 | 89% | ~75% | 3–6 | Draw table, borders and cell effects depth | [parity-checklist.md](parity-checklist.md) |
 | Charts | 7 | 65% | ~45% | 12–20 | Data grid editing, chart elements, the `chartex` types (waterfall, funnel, treemap, sunburst, histogram, box) | [parity-checklist.md](parity-checklist.md) |
-| SmartArt | 4 | 33% | ~25% | 10–16 | Text pane, layout switching, the diagram data model on save | [parity-checklist.md](parity-checklist.md) |
+| SmartArt | 4 | 50% | ~35% | 8–14 | PowerPoint diagrams editable (read their data model), the data model on save, more layouts | [parity-checklist.md](parity-checklist.md) |
 | Pictures | 7 | 48% | ~45% | 12–20 | SVG/EMF/WMF, clipboard paste on Windows/Linux (#53), artistic effects, remove background, compress | [file-format-parity.md](file-format-parity.md) |
 | Media | 4 | 67% | ~60% | 8–14 | WMA/WMV decode, record audio/screen, 3-D models and stock content, playback options lost on PPTX round trip (#74) | [file-format-parity.md](file-format-parity.md) |
 | Transitions | 4 | 92% | ~80% | 4–8 | Transition sounds, 3-D transitions approximated in 2-D | [animation-parity.md](animation-parity.md) |
 | Animations | 6 | 79% | ~65% | 10–16 | 64 of PowerPoint's ~190 effects, Animation Pane timeline, preview, rewind lost on save (#77) | [animation-parity.md](animation-parity.md) |
-| Slide show and presenter view | 8 | 66% | ~60% | 10–16 | Second-display placement, laser pointer, recording, subtitles, ink depth | [slideshow-parity.md](slideshow-parity.md) |
+| Slide show and presenter view | 8 | 68% | ~60% | 10–16 | Second-display placement, laser from presenter view, recording, subtitles, ink depth | [slideshow-parity.md](slideshow-parity.md) |
 | Review | 3 | 60% | ~45% | 8–14 | Modern comment threads on round trip (#70), compare, version history, real spelling dictionaries | [file-format-parity.md](file-format-parity.md) |
 | Draw (ink) | 2 | 33% | ~30% | 5–9 | Pen pressure, ink to shape/text/math, lasso | [hardware-parity.md](hardware-parity.md) |
 | Undo and clipboard | 3 | 88% | ~75% | 3–5 | Paste Special, image paste (#53) | [ui-parity.md](ui-parity.md) |
@@ -214,6 +230,16 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
   inheritance (slide → layout → master → theme), sections, notes, comments, custom shows,
   header/footer fields, embedded media, unlimited undo on shared slide snapshots.
 - **Themes:** 8 original themes with colour and font schemes, custom colours and fonts,
+  backgrounds (solid, gradient, picture, pattern), slide size presets. File › New also offers 6
+  original starter decks (Briefing, Lesson, Pitch, Field Notes, Quarterly, Evening Talk).
+  backgrounds (solid, gradient, picture, pattern), slide size presets. Design › Colors ›
+  Customize Colors… opens Create New Theme Colors and edits the open master's twelve theme
+  colours (one scheme on that master, not a library of saved schemes).
+  backgrounds (solid, gradient, picture, pattern), slide size presets. Design › Fonts ›
+  Customize Fonts… opens Create New Theme Fonts and edits the open master's heading and body
+  latin faces (one scheme on that master, not a library of saved font schemes, and not East
+  Asian or complex-script faces).
+  effect schemes (Design ▸ Effects: DeckCraft, Soft, Crisp, Lift, Glow, Plain),
   backgrounds (solid, gradient, picture, pattern), slide size presets.
 - **Shapes:** ~180 preset geometries with adjustment handles, text boxes, pictures (crop,
   corrections, animated GIFs that play and pause), tables with styles, charts (column, bar, line,
@@ -222,7 +248,8 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
   text readable.
 - **Text:** in-place editing with caret, selection, keyboard and mouse; every Home-tab font and
   paragraph control; bullets and numbering; levels; autofit; columns; vertical text; date fields in
-  their own format; hyperlinks drawn in the theme's hyperlink colour and followed in the show.
+  their own format (Insert › Date and Time picks the format and language, or inserts the sample as
+  fixed text); hyperlinks drawn in the theme's hyperlink colour and followed in the show.
   UAX #9 bidi and Arabic shaping with HarfRust, script font slots with per-cluster fallback,
   `justLow` kashida, bidi caret and selection.
 - **Editing:** select, marquee, move, resize, rotate, adjust; smart guides; nudge; duplicate;
@@ -230,12 +257,21 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
 - **Transitions and animations:** 48 transitions including Morph (objects, words, characters,
   geometry outlines), 64 animation effects (entrance, emphasis, exit, motion paths, media),
   triggers, by-paragraph builds, Animation Painter, on a shared timeline engine.
-- **Slide show:** full screen, keyboard/mouse navigation, blank screens, go-to-slide, pen,
-  presenter window, rehearse timings, custom shows, Set Up Show, Reading View; links and shape
-  actions followed on click.
+- **Slide show:** full screen, keyboard/mouse navigation, blank screens, go-to-slide (the typed number is shown), See All
+  Slides, click-to-zoom, pen, presenter window (black, white, zoom, the slide grid, a timer that
+  pauses and resets, a local clock, and notes size), rehearse timings, custom shows played on
+  their own, Set Up Show, Reading View; links and shape actions followed on click.
 - **Views:** Normal, Outline, Slide Sorter, Notes Page, Reading View, Slide Master; zoom;
   grayscale.
 - **Review:** comments with replies and resolve, previous and next across the deck, accessibility checker, a basic spelling list.
+- **Views:** Normal, Outline, Slide Sorter, Notes Page, Reading View, Slide Master; zoom
+  (dialog: percent or Fit); grayscale.
+- **Slide show:** full screen, keyboard/mouse navigation, blank screens, go-to-slide, pen,
+  presenter window, rehearse timings, custom shows, Set Up Show, Reading View; links and shape
+  actions followed on click.
+- **Views:** Normal, Outline, Slide Sorter, Notes Page, Reading View, Slide Master (Preserve on
+  the open master or layout, and Title and Footers placeholders); zoom; grayscale.
+- **Review:** comments with replies and resolve, accessibility checker, a basic spelling list.
 - **Media:** MP3, AAC/M4A, ALAC, WAV, AIFF, CAF, FLAC, Ogg Vorbis and Opus audio; H.264, HEVC,
   VP9 and AV1 video in MP4/MOV/WebM/MKV with pure-Rust decoders; poster frames, trim, fades,
   volume, loop, play across slides.
@@ -244,7 +280,13 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
   text, AutoRecover.
 - **Automation:** 227 commands, every one reachable from `deckcraft-cli`, the JSON control channel
 - **Automation:** 228 commands, every one reachable from `deckcraft-cli`, the JSON control channel
+- **Automation:** 227 commands, every one reachable from `deckcraft-cli`, the JSON control channel
+- **Automation:** 228 commands, every one reachable from `deckcraft-cli`, the JSON control channel
   and MCP.
+- **Automation:** 227 commands, every one reachable from `deckcraft-cli`, the JSON control channel
+  and MCP. The menu-bar measurement and the d556ff9 snapshot still count 226.
+- **Automation:** 236 commands, every one reachable from `deckcraft-cli`, the JSON control channel
+  and MCP. The menu-bar measurement and the d556ff9 snapshot still count 226 commands.
 - **Platforms:** signed releases for macOS (universal), Windows x64/x86/arm64, Linux
   (AppImage/deb/rpm/tar.gz/Flatpak, x86_64 and aarch64), FreeBSD and the web (v0.4.0, 2026-10-09).
 
@@ -284,6 +326,20 @@ scored done (16 open issues).
 | 2026-10-14 | minor | Media remainder: Insert › Icons places Lucide stroke icons. 3-D models and stock content remain. Headline percentages unchanged; the checklist row stays missing |
 | 2026-10-14 | trivial | Size and Position dialog. Command count 226 → 227. Breadth stays 79%, ready stays ~55%, UI stays ~60% |
 | 2026-10-14 | trivial | 228 commands; Review lists previous and next comment. Breadth stays 79%; the comments checklist row stays D |
+| 2026-10-14 | minor | Ecosystem evidence: six original starter decks. The dimension stays ~25% because PowerPoint's large gallery is still absent |
+| 2026-10-14 | trivial | Working today: 227 commands. Breadth stays 79%, ready ~55%. The d556ff9 snapshot (226 commands, 27 dialogs) is unchanged |
+| 2026-10-14 | trivial | Working today: 228 commands. Breadth stays 79%, ready ~55%. The d556ff9 snapshot (226 commands, 27 dialogs) is unchanged |
+| 2026-10-14 | minor | What works today: Create New Theme Colors. The d556ff9 snapshot (226 commands, 27 dialogs) and the breadth / ready percentages are unchanged |
+| 2026-10-14 | minor | What works today: Create New Theme Fonts. The d556ff9 snapshot (226 commands, 27 dialogs) and the breadth / ready percentages are unchanged |
+| 2026-10-14 | trivial | Insert › Date and Time noted under what works today. The d556ff9 snapshot (226 commands, 27 dialogs) and the readiness percentages are unchanged |
+| 2026-10-14 | trivial | Zoom dialog takes a percent or Fit. Breadth stays 79%; the zoom checklist row stays D |
+| 2026-10-14 | trivial | Slide show evidence includes a visible go-to-slide number. Breadth stays 79% |
+| 2026-10-14 | trivial | Slide show evidence includes custom show playback. Breadth stays 79% |
+| 2026-10-14 | trivial | Slide show evidence includes presenter timer pause/reset, a local clock and notes size. Breadth stays 79% |
+| 2026-10-14 | trivial | Slide show evidence includes See All Slides and zoom. Breadth stays 79% |
+| 2026-10-13 | trivial | Essentials discoverability note: the command palette's Export failure (#79) is fixed; the ×0.95 discount stays for the menu bar and start screen |
+| 2026-10-14 | minor | Design ▸ Effects noted under what works today. Percentages stay 79% / ~60% / ~55%. The d556ff9 snapshot and the menu measurement stay at 226 commands; the live registry is 227 |
+| 2026-10-14 | minor | Slide Master Preserve and Title/Footers placeholders. Automation in "what works today" is 236 commands; the menu-bar measurement and the d556ff9 snapshot still count 226. Percentages unchanged |
 | 2026-10-10 | minor | Added the readiness-by-audience table: each number gets its own hours to ~95% (full 340–600, mainstream 150–250, essentials 50–90). The full number stays an additive weighted sum; no change to the percentages |
 | 2026-10-10 | minor | Added the mainstream practitioner (~53%) and essentials user (~62%) numbers with written weights, discounts and user evidence. Features dimension recomputed from written area weights (66% judgement → 62.4% weighted mean), which moves ready for real work from ~56% to ~55%; stage unchanged |
 | 2026-10-10 | minor | Stage checked against the core-workflow gate (all six pass); stays alpha |

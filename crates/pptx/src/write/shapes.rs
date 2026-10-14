@@ -156,28 +156,30 @@ fn cnvpr(w: &mut W, x: &mut Exp, o: &mut Out, id: u32, s: &Shape) {
     w.close("p:cNvPr");
 }
 
-fn nv_pr(w: &mut W, s: &Shape) {
-    match &s.ph {
-        Some(ph) => {
-            w.open0("p:nvPr");
-            let ty = match ph.kind {
-                PhType::Obj => None,
-                k => Some(k.xml()),
-            };
-            let sz = ph.size.as_deref().filter(|z| matches!(*z, "full" | "half" | "quarter"));
-            w.empty(
-                "p:ph",
-                A::new()
-                    .o("type", ty)
-                    .o("orient", ph.vertical.then_some("vert"))
-                    .o("sz", sz)
-                    .o("idx", (ph.idx != 0).then_some(ph.idx))
-                    .t("hasCustomPrompt", ph.has_custom_prompt),
-            );
-            w.close("p:nvPr");
-        }
-        None => w.empty0("p:nvPr"),
+fn nv_pr(w: &mut W, x: &mut Exp, o: &mut Out, s: &Shape) {
+    if s.ph.is_none() && s.tags.is_empty() {
+        w.empty0("p:nvPr");
+        return;
     }
+    w.open0("p:nvPr");
+    if let Some(ph) = &s.ph {
+        let ty = match ph.kind {
+            PhType::Obj => None,
+            k => Some(k.xml()),
+        };
+        let sz = ph.size.as_deref().filter(|z| matches!(*z, "full" | "half" | "quarter"));
+        w.empty(
+            "p:ph",
+            A::new()
+                .o("type", ty)
+                .o("orient", ph.vertical.then_some("vert"))
+                .o("sz", sz)
+                .o("idx", (ph.idx != 0).then_some(ph.idx))
+                .t("hasCustomPrompt", ph.has_custom_prompt),
+        );
+    }
+    super::cust_data(w, x, o, &s.tags);
+    w.close("p:nvPr");
 }
 
 /// Locking attributes. Lock writes the full set PowerPoint writes for the element's kind (and
@@ -205,7 +207,11 @@ fn locks(w: &mut W, tag: &str, s: &Shape, extra: A) {
 }
 
 fn style(w: &mut W, st: &ShapeStyle) {
-    w.open0("p:style");
+    style_tag(w, st, "p:style");
+}
+
+fn style_tag(w: &mut W, st: &ShapeStyle, tag: &str) {
+    w.open0(tag);
     for (tag, (idx, c)) in [("a:lnRef", &st.line_ref), ("a:fillRef", &st.fill_ref), ("a:effectRef", &st.effect_ref)] {
         w.open(tag, A::new().a("idx", idx));
         dml::color(w, c);
@@ -223,12 +229,16 @@ fn style(w: &mut W, st: &ShapeStyle) {
         }
         None => w.empty("a:fontRef", A::new().a("idx", idx)),
     }
-    w.close("p:style");
+    w.close(tag);
 }
 
 /// `p:spPr` contents (also used for pictures and connectors).
 fn sp_pr(w: &mut W, x: &mut Exp, o: &mut Out, s: &Shape, geom: bool) {
-    w.open0("p:spPr");
+    sp_pr_tag(w, x, o, s, geom, "p:spPr");
+}
+
+fn sp_pr_tag(w: &mut W, x: &mut Exp, o: &mut Out, s: &Shape, geom: bool, tag: &str) {
+    w.open0(tag);
     if let Some(xf) = &s.xfrm {
         dml::xfrm(w, "a:xfrm", xf, None);
     }
@@ -249,7 +259,7 @@ fn sp_pr(w: &mut W, x: &mut Exp, o: &mut Out, s: &Shape, geom: bool) {
             w.raw(&xml);
         }
     }
-    w.close("p:spPr");
+    w.close(tag);
 }
 
 /// Write the children of a shape tree.
@@ -289,7 +299,7 @@ pub fn shape(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, depth
             w.open0("p:cNvPicPr");
             locks(w, "a:picLocks", s, A::new().a("noChangeAspect", "1"));
             w.close("p:cNvPicPr");
-            nv_pr(w, s);
+            nv_pr(w, x, o, s);
             w.close("p:nvPicPr");
             dml::blip_fill(w, x, o, "p:blipFill", fill);
             let mut s2 = s.clone();
@@ -302,6 +312,11 @@ pub fn shape(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, depth
             }
             w.close("p:pic");
         }
+        ShapeKind::Group { children, child } if s.diagram.is_some() && depth < 32 => {
+            if let Some(d) = &s.diagram {
+                diagram(w, x, o, cx, s, d, children, child);
+            }
+        }
         ShapeKind::Group { children, child } => {
             let id = cx.id_for(s);
             w.open0("p:grpSp");
@@ -310,7 +325,7 @@ pub fn shape(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, depth
             w.open0("p:cNvGrpSpPr");
             locks(w, "a:grpSpLocks", s, A::new());
             w.close("p:cNvGrpSpPr");
-            nv_pr(w, s);
+            nv_pr(w, x, o, s);
             w.close("p:nvGrpSpPr");
             w.open0("p:grpSpPr");
             let xf = s.xfrm.unwrap_or(*child);
@@ -345,7 +360,7 @@ pub fn shape(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, depth
                 }
                 w.close("p:cNvCxnSpPr");
             }
-            nv_pr(w, s);
+            nv_pr(w, x, o, s);
             w.close("p:nvCxnSpPr");
             let mut s2 = s.clone();
             if matches!(s2.fill, Some(Fill::Background)) {
@@ -370,12 +385,32 @@ pub fn shape(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, depth
         }
         ShapeKind::Chart(c) => {
             let id = cx.id_for(s);
-            let rid = x.chart_rel(o, c);
+            // An unchanged Office 2016 chart goes back as itself, with a plain chart of the same
+            // data for readers without `cx1`, as PowerPoint writes it.
+            let ex = x.chartex_rel(o, c);
+            if let Some(exid) = &ex {
+                w.open("mc:AlternateContent", A::new().a("xmlns:mc", "http://schemas.openxmlformats.org/markup-compatibility/2006"));
+                w.open("mc:Choice", A::new().a("xmlns:cx1", "http://schemas.microsoft.com/office/drawing/2015/9/8/chartex").a("Requires", "cx1"));
+                frame_open(w, x, o, id, s);
+                w.open("a:graphicData", A::new().a("uri", super::chart::NS_CX));
+                w.empty("cx:chart", A::new().a("xmlns:cx", super::chart::NS_CX).a("r:id", exid));
+                w.close("a:graphicData");
+                frame_close(w);
+                w.close("mc:Choice");
+                w.open0("mc:Fallback");
+            }
+            let mut plain = (**c).clone();
+            plain.raw = plain.raw.filter(|r| !r.contains(super::chart::NS_CX));
+            let rid = x.chart_rel(o, &plain);
             frame_open(w, x, o, id, s);
             w.open("a:graphicData", A::new().a("uri", "http://schemas.openxmlformats.org/drawingml/2006/chart"));
             w.empty("c:chart", A::new().a("xmlns:c", crate::opc::NS_C).a("r:id", rid));
             w.close("a:graphicData");
             frame_close(w);
+            if ex.is_some() {
+                w.close("mc:Fallback");
+                w.close("mc:AlternateContent");
+            }
         }
         ShapeKind::Media(m) => {
             let id = cx.id_for(s);
@@ -464,6 +499,89 @@ fn write_model(
     w.close("mc:AlternateContent");
 }
 
+/// A SmartArt graphic: a graphic frame naming its data, layout, quick style and colour parts,
+/// with the group's shapes as the cached drawing PowerPoint shows until it lays the diagram out.
+#[allow(clippy::too_many_arguments)]
+fn diagram(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, d: &deckcraft_model::Diagram, children: &[Shape], child: &Xfrm) {
+    use crate::dgm;
+    let id = cx.id_for(s);
+    let n = x.next_diagram();
+    let frame = s.xfrm.unwrap_or(*child);
+    let name = |kind: &str| format!("ppt/diagrams/{kind}{n}.xml");
+    // The drawing: the group's shapes in the frame's own coordinates.
+    let dname = name("drawing");
+    let mut dout = Out::new(&dname);
+    let mut dw = W::new();
+    dw.open(
+        "dsp:drawing",
+        A::new().a("xmlns:dgm", dgm::NS_DGM).a("xmlns:dsp", dgm::NS_DSP).a("xmlns:a", crate::opc::NS_A).a("xmlns:r", crate::opc::NS_R),
+    );
+    dw.open0("dsp:spTree");
+    dw.open0("dsp:nvGrpSpPr");
+    dw.empty("dsp:cNvPr", A::new().a("id", 0).a("name", ""));
+    dw.empty0("dsp:cNvGrpSpPr");
+    dw.close("dsp:nvGrpSpPr");
+    dw.empty0("dsp:grpSpPr");
+    let (sx, sy) = (frame.w / child.w.max(1e-6), frame.h / child.h.max(1e-6));
+    let mut k = 0;
+    let mut flat = vec![];
+    walk(children, &mut |c, _| {
+        if matches!(c.kind, ShapeKind::Shape) {
+            flat.push(c.clone());
+        }
+    });
+    for mut c in flat.into_iter().take(10_000) {
+        if let Some(xf) = &mut c.xfrm {
+            *xf = Xfrm { x: (xf.x - child.x) * sx, y: (xf.y - child.y) * sy, w: xf.w * sx, h: xf.h * sy, ..*xf };
+        }
+        k += 1;
+        dw.open("dsp:sp", A::new().a("modelId", format!("{{{:08X}-5D1A-4C0A-9E5B-{k:012X}}}", s.id.0)));
+        dw.open0("dsp:nvSpPr");
+        dw.empty("dsp:cNvPr", A::new().a("id", 0).a("name", ""));
+        dw.empty0("dsp:cNvSpPr");
+        dw.close("dsp:nvSpPr");
+        sp_pr_tag(&mut dw, x, &mut dout, &c, true, "dsp:spPr");
+        if let Some(st) = &c.style {
+            style_tag(&mut dw, st, "dsp:style");
+        }
+        if let Some(tb) = &c.text {
+            dml::text_body(&mut dw, x, &mut dout, "dsp:txBody", tb, false);
+        }
+        dw.close("dsp:sp");
+    }
+    dw.close("dsp:spTree");
+    dw.close("dsp:drawing");
+    x.pkg.xml_part(&dname, dgm::CT_DRAWING, dw.finish());
+    x.pkg.rels(&dname, &dout.rels);
+    let rel = |o: &mut Out, kind: &str, part: &str| o.rels.add_new(kind, &crate::opc::relative(&o.name, part), false);
+    let drawing_rel = rel(o, dgm::RT_DRAWING, &dname);
+    let data = name("data");
+    // Node pictures: on the data model's presentation points, through the data part's rels.
+    let mut mout = Out::new(&data);
+    let pics: Vec<(usize, String)> =
+        d.nodes.iter().enumerate().filter_map(|(k, n)| n.picture.and_then(|m| x.media_rel(&mut mout, m, "image")).map(|r| (k, r))).collect();
+    x.pkg.xml_part(&data, dgm::CT_DATA, dgm::data_xml(d, s.id.0, &drawing_rel, &pics));
+    x.pkg.rels(&data, &mout.rels);
+    let dm = rel(o, "diagramData", &data);
+    let layout = name("layout");
+    let lo_xml = d.layout_xml.clone().map(String::into_bytes).unwrap_or_else(|| dgm::layout_xml(&d.kind));
+    x.pkg.xml_part(&layout, dgm::CT_LAYOUT, lo_xml);
+    let lo = rel(o, "diagramLayout", &layout);
+    let style = name("quickStyle");
+    x.pkg.xml_part(&style, dgm::CT_STYLE, d.style_xml.clone().map(String::into_bytes).unwrap_or_else(|| dgm::style_xml(&d.style)));
+    let qs = rel(o, "diagramQuickStyle", &style);
+    let colors = name("colors");
+    x.pkg.xml_part(&colors, dgm::CT_COLORS, d.colors_xml.clone().map(String::into_bytes).unwrap_or_else(|| dgm::colors_xml(&d.colors)));
+    let cs = rel(o, "diagramColors", &colors);
+    let mut fs = s.clone();
+    fs.xfrm = Some(frame);
+    frame_open(w, x, o, id, &fs);
+    w.open("a:graphicData", A::new().a("uri", "http://schemas.openxmlformats.org/drawingml/2006/diagram"));
+    w.empty("dgm:relIds", A::new().a("xmlns:dgm", dgm::NS_DGM).a("r:dm", dm).a("r:lo", lo).a("r:qs", qs).a("r:cs", cs));
+    w.close("a:graphicData");
+    frame_close(w);
+}
+
 fn ink_shape(st: &deckcraft_model::InkStroke, i: usize) -> Option<Shape> {
     let pts: Vec<(f64, f64)> = st.points.iter().filter(|p| p.0.is_finite() && p.1.is_finite()).map(|p| (p.0, p.1)).collect();
     let (x0, y0) = pts.iter().fold((f64::MAX, f64::MAX), |a, p| (a.0.min(p.0), a.1.min(p.1)));
@@ -512,7 +630,7 @@ fn sp(w: &mut W, x: &mut Exp, o: &mut Out, id: u32, s: &Shape, math: bool) {
     } else {
         w.empty("p:cNvSpPr", cnv);
     }
-    nv_pr(w, s);
+    nv_pr(w, x, o, s);
     w.close("p:nvSpPr");
     let tmp;
     let sref = if matches!(s.fill, Some(Fill::Background)) {
@@ -540,7 +658,7 @@ fn frame_open(w: &mut W, x: &mut Exp, o: &mut Out, id: u32, s: &Shape) {
     w.open0("p:cNvGraphicFramePr");
     w.empty("a:graphicFrameLocks", A::new().a("noGrp", "1").t("noDrilldown", s.locked).t("noMove", s.locked).t("noResize", s.locked));
     w.close("p:cNvGraphicFramePr");
-    nv_pr(w, s);
+    nv_pr(w, x, o, s);
     w.close("p:nvGraphicFramePr");
     let xf = s.xfrm.unwrap_or_default();
     let mut xf0 = xf;

@@ -10,26 +10,37 @@ The summary between `<!-- SUMMARY -->
 | P0 | 72 | 61 | 11 | 0 | 92% |
 | P1 | 65 | 39 | 20 | 6 | 75% |
 | P2 | 54 | 13 | 15 | 26 | 38% |
+| P1 | 65 | 38 | 21 | 6 | 75% |
+| P2 | 54 | 13 | 16 | 25 | 39% |
+| P1 | 65 | 38 | 21 | 6 | 75% |
+| P2 | 54 | 14 | 15 | 25 | 40% |
+| P1 | 65 | 39 | 21 | 5 | 76% |
+| P2 | 54 | 14 | 17 | 23 | 42% |
 
 | Area | Parity |
 |---|---|
-| Application shell | 77% |
+| Application shell | 81% |
 | Files | 71% |
 | Slides | 90% |
-| Views | 90% |
+| Views | 93% |
 | Masters & themes | 85% |
+| Views | 90% |
+| Masters & themes | 88% |
 | Shapes | 88% |
+| Shapes | 91% |
 | Format | 83% |
 | Arrange | 100% |
 | Text | 80% |
-| Tables | 89% |
+| Tables | 95% |
 | Charts | 65% |
 | SmartArt | 33% |
+| Pictures | 52% |
+| SmartArt | 50% |
 | Pictures | 48% |
 | Media | 67% |
-| Transitions | 92% |
+| Transitions | 100% |
 | Animations | 79% |
-| Slide show | 66% |
+| Slide show | 68% |
 | Review | 60% |
 | Draw | 33% |
 | Undo & clipboard | 100% |
@@ -45,7 +56,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Application shell | Start screen (new, templates/themes, recent) | P0 | D |
 | Application shell | Ribbon with Home/Insert/Draw/Design/Transitions/Animations/Slide Show/Review/View tabs | P0 | D |
 | Application shell | Contextual tabs (Shape Format, Picture Format, Table Design/Layout, Chart Design) | P0 | P |
-| Application shell | Quick Access toolbar / title bar commands | P1 | P |
+| Application shell | Quick Access toolbar / title bar commands | P1 | D |
 | Application shell | Native menu bar (macOS) with every command | P1 | M |
 | Application shell | Command palette / Tell me search | P1 | D |
 | Application shell | Keyboard shortcuts for every common command | P0 | D |
@@ -89,7 +100,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Views | Rulers, gridlines, guides | P1 | P |
 | Views | Smart guides | P1 | D |
 | Views | Grayscale / black and white view | P2 | D |
-| Views | New window / arrange windows | P2 | M |
+| Views | New window / arrange windows | P2 | P |
 | Masters & themes | Slide Master view (edit master and layouts) | P0 | D |
 | Masters & themes | Insert/rename/delete layouts, insert placeholders | P1 | D |
 | Masters & themes | Handout and Notes masters | P2 | M |
@@ -102,7 +113,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Masters & themes | Hide background graphics | P1 | D |
 | Masters & themes | Slide size (16:9, 4:3, presets, custom) | P0 | D |
 | Masters & themes | Header & footer (date, slide number, footer) | P1 | D |
-| Masters & themes | Browse themes from .pptx/.thmx | P2 | M |
+| Masters & themes | Browse themes from .pptx/.thmx | P2 | D |
 | Masters & themes | Designer layout suggestions (offline) | P2 | M |
 | Shapes | Preset shapes (lines, rectangles, basic, arrows, equation, flowchart, stars, callouts) | P0 | D |
 | Shapes | Action buttons | P2 | D |
@@ -169,7 +180,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Tables | Insert/delete rows and columns | P0 | D |
 | Tables | Merge and split cells | P1 | D |
 | Tables | Distribute rows/columns, sizes | P1 | D |
-| Tables | Cell fill, borders, margins, alignment | P1 | P |
+| Tables | Cell fill, borders, margins, alignment | P1 | D |
 | Tables | Keyboard navigation between cells | P0 | D |
 | Charts | Insert chart (column, bar, line, area, pie, doughnut, scatter) | P0 | D |
 | Charts | Other chart types (radar, stock, combo, waterfall, funnel, treemap, sunburst, histogram, box) | P2 | P |
@@ -177,14 +188,16 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Charts | Chart elements (title, legend, labels, axes, gridlines) | P1 | P |
 | Charts | Chart styles and colours | P2 | P |
 | SmartArt | Insert SmartArt (lists, processes, cycles, hierarchy) | P1 | P |
-| SmartArt | Text pane and layout switching | P2 | M |
+| SmartArt | Text pane and layout switching | P2 | P |
 | Pictures | Insert picture (PNG, JPEG, GIF, WebP, BMP, TIFF) | P0 | D |
 | Pictures | SVG pictures | P1 | M |
 | Pictures | Crop (and crop to shape, aspect ratio) | P0 | P |
-| Pictures | Corrections, colour, transparency | P1 | P |
+| Pictures | Corrections, colour, transparency (recolor and Set Transparent Color done; sharpen/soften and colour temperature pending) | P1 | P |
 | Pictures | Artistic effects | P2 | M |
+| Pictures | Corrections, colour, transparency | P1 | P |
+| Pictures | Artistic effects | P2 | P |
 | Pictures | Remove background | P2 | M |
-| Pictures | Picture styles and borders | P1 | P |
+| Pictures | Picture styles and borders | P1 | D |
 | Pictures | Change / reset picture | P1 | D |
 | Pictures | Compress pictures | P2 | M |
 | Pictures | Paste image from clipboard (fails on Windows and Linux, #53) | P0 | P |
@@ -213,7 +226,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Slide show | Navigation (keys, click, go to slide, blank screen) | P0 | D |
 | Slide show | Presenter view (notes, next slide, timer) | P0 | P |
 | Slide show | Pen and highlighter ink during the show | P1 | P |
-| Slide show | Laser pointer | P2 | M |
+| Slide show | Laser pointer | P2 | P |
 | Slide show | Rehearse timings | P2 | D |
 | Slide show | Custom shows | P2 | D |
 | Slide show | Set up show (loop, kiosk, without animation) | P1 | D |

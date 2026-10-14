@@ -282,6 +282,13 @@ pub enum ShapeKind {
     Ink {
         strokes: Vec<InkStroke>,
     },
+    /// A 3-D model (`p:contentPart` with a `model3d` relationship, usually a `.glb`).
+    /// `poster` is the fallback picture an `mc:AlternateContent` choice carried for older readers.
+    Model3d {
+        media: MediaId,
+        #[serde(default)]
+        poster: Option<MediaId>,
+    },
     /// Something we read but don't model (SmartArt without fallback, OLE…): its XML is kept and its
     /// fallback picture, if any, is shown.
     Opaque {
@@ -388,6 +395,7 @@ impl Shape {
             ShapeKind::Media(m) if m.video => "video",
             ShapeKind::Media(_) => "audio",
             ShapeKind::Ink { .. } => "ink",
+            ShapeKind::Model3d { .. } => "model",
             ShapeKind::Opaque { .. } => "object",
         }
     }
@@ -802,6 +810,35 @@ pub struct Properties {
     pub revision: u32,
 }
 
+/// One typeface embedded in the presentation (`p:embeddedFont`). Each slot is a font file in
+/// [`Presentation::media`]: regular, bold, italic, bold italic. A slot is absent when the file
+/// didn't include that face.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct EmbeddedFont {
+    pub typeface: String,
+    /// `panose` on `p:font`, when the file gave the 20 hex digits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub panose: Option<String>,
+    /// `pitchFamily` on `p:font`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pitch_family: Option<u8>,
+    /// `charset` on `p:font`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub charset: Option<u8>,
+    pub regular: Option<MediaId>,
+    pub bold: Option<MediaId>,
+    pub italic: Option<MediaId>,
+    pub bold_italic: Option<MediaId>,
+}
+
+impl EmbeddedFont {
+    /// The four face slots, in the order the package stores them.
+    pub fn faces(&self) -> [Option<MediaId>; 4] {
+        [self.regular, self.bold, self.italic, self.bold_italic]
+    }
+}
+
 /// An embedded file (image, audio, video, font, workbook).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -838,8 +875,8 @@ pub struct Presentation {
     pub first_slide_number: u32,
     /// Next free shape/slide/layout/media id.
     pub next_id: u32,
-    /// Embedded fonts (family names; bytes in `media`).
-    pub embedded_fonts: Vec<(String, MediaId)>,
+    /// Embedded fonts. The face bytes live in [`Self::media`].
+    pub embedded_fonts: Vec<EmbeddedFont>,
     /// Table styles defined in the file (`ppt/tableStyles.xml`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub table_styles: Vec<table::TableStyleDef>,

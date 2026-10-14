@@ -10,16 +10,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use deckcraft_geom::Xfrm;
-use deckcraft_model::text::{Paragraph, TextBody};
+use deckcraft_model::text::{ListStyle, Paragraph, TextBody};
+use deckcraft_model::theme::Theme;
 use deckcraft_model::{
     Background, Comment, Layout, LayoutId, Master, MediaId, PhType, Placeholder, Presentation, Shape, ShapeId, Slide, SlideId, defaults,
 };
 
 use crate::PptxError;
-use crate::opc::{self, NS_A, NS_P, NS_P14, NS_R, PackageOut, RelsOut};
+use crate::opc::{self, NS_A, NS_P, NS_P14, NS_P188, NS_R, PackageOut, RelsOut};
 use crate::xml::{A, W};
 
-const CT_PRES: &str = "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml";
+pub(crate) const CT_PRES: &str = "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml";
+pub(crate) const CT_TEMPLATE: &str = "application/vnd.openxmlformats-officedocument.presentationml.template.main+xml";
+pub(crate) const CT_SHOW: &str = "application/vnd.openxmlformats-officedocument.presentationml.slideshow.main+xml";
 const CT_SLIDE: &str = "application/vnd.openxmlformats-officedocument.presentationml.slide+xml";
 const CT_LAYOUT: &str = "application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml";
 const CT_MASTER: &str = "application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml";
@@ -32,6 +35,12 @@ const CT_TABLE_STYLES: &str = "application/vnd.openxmlformats-officedocument.pre
 const CT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 const CT_COMMENTS: &str = "application/vnd.openxmlformats-officedocument.presentationml.comments+xml";
 const CT_AUTHORS: &str = "application/vnd.openxmlformats-officedocument.presentationml.commentAuthors+xml";
+/// Modern threaded comments (read by PowerPoint 2021+ and DeckCraft; the flattened legacy
+/// part next to it serves older readers).
+pub(crate) const CT_COMMENTS_MODERN: &str = "application/vnd.ms-powerpoint.comments+xml";
+const CT_AUTHORS_MODERN: &str = "application/vnd.ms-powerpoint.authors+xml";
+const RT_COMMENTS_MODERN: &str = "http://schemas.microsoft.com/office/2018/10/relationships/comments";
+const RT_AUTHORS_MODERN: &str = "http://schemas.microsoft.com/office/2018/10/relationships/authors";
 const CT_CORE: &str = "application/vnd.openxmlformats-package.core-properties+xml";
 const CT_APP: &str = "application/vnd.openxmlformats-officedocument.extended-properties+xml";
 
@@ -82,6 +91,7 @@ fn ext_for(content_type: &str, name: &str, data: &[u8]) -> String {
         "audio/x-ms-wma" => "wma",
         "audio/ogg" => "ogg",
         "audio/flac" => "flac",
+        "model/gltf-binary" => "glb",
         _ => "",
     };
     if !by_ct.is_empty() {
@@ -281,6 +291,31 @@ fn ext_children(raw: Option<&str>) -> Option<String> {
     Some(raw.to_string())
 }
 
+/// The slide's extension list, plus the modern-comments anchor when the slide has a threaded
+/// comment part: the rel reference is how PowerPoint finds it.
+fn slide_ext_list(w: &mut W, raw: Option<&str>, comment_rel: Option<&str>) {
+    let mut exts: Vec<String> = raw
+        .filter(|r| !r.trim().is_empty())
+        .and_then(|raw| crate::xml::parse(format!("<x>{raw}</x>").as_bytes()).ok())
+        .map(|d| d.root.elements().filter(|e| e.is("ext") && e.has_attr("uri")).map(|e| e.to_xml()).collect())
+        .unwrap_or_default();
+    if let Some(rid) = comment_rel {
+        let mut e = W::frag();
+        e.open("p:ext", A::new().a("uri", crate::COMMENTS_EXT_URI));
+        e.empty("p188:commentRel", A::new().a("xmlns:p188", NS_P188).a("r:id", rid));
+        e.close("p:ext");
+        exts.push(e.s);
+    }
+    if exts.is_empty() {
+        return;
+    }
+    w.open0("p:extLst");
+    for e in exts {
+        w.raw(&e);
+    }
+    w.close("p:extLst");
+}
+
 fn notes_master_shapes(size: deckcraft_geom::Size) -> Vec<Shape> {
     let (w, h) = (size.width, size.height);
     let mk = |id: u32, name: &str, kind: PhType, idx: u32, x: f64, y: f64, ww: f64, hh: f64| Shape {
@@ -308,7 +343,42 @@ fn notes_master_shapes(size: deckcraft_geom::Size) -> Vec<Shape> {
     ]
 }
 
-fn notes_style() -> deckcraft_model::text::ListStyle {
+/// What the notes master should be on save. A master we read is written back, including its
+/// header, footer, date and slide-number text. A deck that has never had one gets the placeholders
+/// we generate.
+struct NotesMasterWrite {
+    shapes: Vec<Shape>,
+    background: Option<Background>,
+    color_map: Vec<(String, String)>,
+    style: ListStyle,
+    theme: Option<Theme>,
+}
+
+fn notes_master_write(p: &Presentation) -> Option<NotesMasterWrite> {
+    let kept = p.notes_master.as_ref().filter(|m| !m.shapes.is_empty());
+    let has_notes = p.slides.iter().any(|s| !s.notes.is_empty());
+    if !has_notes && kept.is_none() {
+        return None;
+    }
+    Some(match kept {
+        Some(m) => NotesMasterWrite {
+            shapes: m.shapes.clone(),
+            background: m.background.clone(),
+            color_map: m.color_map.clone(),
+            style: if m.body_style.is_empty() { notes_style() } else { m.body_style.clone() },
+            theme: Some(m.theme.clone()),
+        },
+        None => NotesMasterWrite {
+            shapes: notes_master_shapes(p.notes_size),
+            background: Some(Background::Ref { idx: 1001, color: deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Bg1) }),
+            color_map: vec![],
+            style: notes_style(),
+            theme: None,
+        },
+    })
+}
+
+fn notes_style() -> ListStyle {
     let mut ls = deckcraft_model::text::ListStyle::default();
     for i in 0..9u8 {
         ls.set(
@@ -331,12 +401,24 @@ fn notes_style() -> deckcraft_model::text::ListStyle {
     ls
 }
 
+/// A plausible xsd:dateTime (`YYYY-MM-DD[THH:MM:SS(.frac)?(Z|±HH:MM)?]`): the ranges are
+/// checked, so a model value like `2025-13-45T99:99` falls back to the default instead of
+/// reaching a required `dt`/`created` attribute.
 fn valid_date(s: &str) -> bool {
     let b = s.as_bytes();
-    b.len() >= 10
-        && b.iter().take(4).all(|c| c.is_ascii_digit())
-        && b.get(4) == Some(&b'-')
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || "-:.+TZ".contains(c))
+    let n = |r: std::ops::Range<usize>| s.get(r).and_then(|v| v.parse::<u32>().ok());
+    let (Some(_), Some(mo), Some(d)) = (n(0..4), n(5..7), n(8..10)) else { return false };
+    if b.get(4) != Some(&b'-') || b.get(7) != Some(&b'-') || !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
+        return false;
+    }
+    match b.get(10) {
+        None => true,
+        Some(b'T') => match (n(11..13), n(14..16), n(17..19)) {
+            (Some(h), Some(mi), Some(sec)) => h <= 23 && mi <= 59 && sec <= 60 && b.get(13) == Some(&b':') && b.get(16) == Some(&b':'),
+            _ => false,
+        },
+        Some(_) => false,
+    }
 }
 
 /// A copy of the presentation with every slide pointing at a layout that exists.
@@ -375,7 +457,7 @@ fn sanitized(p: &Presentation) -> std::borrow::Cow<'_, Presentation> {
     std::borrow::Cow::Owned(q)
 }
 
-pub fn export(p: &Presentation) -> Result<Vec<u8>, PptxError> {
+pub fn export(p: &Presentation, main_ct: &str) -> Result<Vec<u8>, PptxError> {
     let p = sanitized(p);
     let p: &Presentation = &p;
     let mut x = Exp {
@@ -434,25 +516,24 @@ pub fn export(p: &Presentation) -> Result<Vec<u8>, PptxError> {
         master_rids.push((master_id, pres.rels.add("slideMaster", &opc::relative("ppt/presentation.xml", &mname), false)));
     }
 
-    // Notes master when any slide has notes.
-    let has_notes = p.slides.iter().any(|s| !s.notes.is_empty());
+    // Notes master when a slide has notes, or the file already has one (its header and footer
+    // live on the master, not on the notes slides).
     let notes_master = "ppt/notesMasters/notesMaster1.xml";
     let mut notes_master_rid = None;
-    if has_notes {
+    if let Some(nm) = notes_master_write(p) {
         let tname = format!("ppt/theme/theme{}.xml", p.masters.len() + 1);
         let mut no = Out::new(notes_master);
         no.rels.add("theme", &opc::relative(notes_master, &tname), false);
-        let theme = p.notes_master.as_ref().map(|m| m.theme.clone()).or_else(|| p.masters.first().map(|m| m.theme.clone())).unwrap_or_default();
+        let theme = nm.theme.or_else(|| p.masters.first().map(|m| m.theme.clone())).unwrap_or_default();
         let mut to = Out::new(&tname);
         let txml = theme::theme_xml(&mut x, &mut to, &theme);
         x.pkg.xml_part(&tname, CT_THEME, txml);
         x.pkg.rels(&tname, &to.rels);
         let mut w = W::new();
         root_open(&mut w, "p:notesMaster", A::new());
-        let bg = Background::Ref { idx: 1001, color: deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Bg1) };
-        csld(&mut w, &mut x, &mut no, "", Some(&bg), &notes_master_shapes(p.notes_size));
-        clr_map(&mut w, &[]);
-        dml::list_style(&mut w, &mut x, &mut no, "p:notesStyle", &notes_style());
+        csld(&mut w, &mut x, &mut no, "", nm.background.as_ref(), &nm.shapes);
+        clr_map(&mut w, &nm.color_map);
+        dml::list_style(&mut w, &mut x, &mut no, "p:notesStyle", &nm.style);
         w.close("p:notesMaster");
         x.pkg.xml_part(notes_master, CT_NOTES_MASTER, w.finish());
         x.pkg.rels(notes_master, &no.rels);
@@ -481,13 +562,21 @@ pub fn export(p: &Presentation) -> Result<Vec<u8>, PptxError> {
             x.pkg.xml_part(&nname, CT_NOTES, xml);
             x.pkg.rels(&nname, &no.rels);
         }
+        let mut comment_rel = None;
         if !s.comments.is_empty() {
             n_comments += 1;
             let cname = format!("ppt/comments/comment{n_comments}.xml");
             so.rels.add("comments", &opc::relative(&sname, &cname), false);
             x.pkg.xml_part(&cname, CT_COMMENTS, comments_xml(&s.comments, &mut authors));
+            // The modern threaded part next to the flattened legacy one (issue #70):
+            // PowerPoint 2021+ and DeckCraft read replies and resolved state from it,
+            // older readers keep the legacy part.
+            let mname = format!("ppt/comments/modernComment{n_comments}.xml");
+            let rid = so.rels.add(RT_COMMENTS_MODERN, &opc::relative(&sname, &mname), false);
+            x.pkg.xml_part(&mname, CT_COMMENTS_MODERN, modern_comments_xml(&s.comments, &cname, &mut authors));
+            comment_rel = Some(rid);
         }
-        let xml = slide_xml(&mut x, &mut so, s);
+        let xml = slide_xml(&mut x, &mut so, s, comment_rel.as_deref());
         x.pkg.xml_part(&sname, CT_SLIDE, xml);
         x.pkg.rels(&sname, &so.rels);
         slide_rids.push(pres.rels.add("slide", &opc::relative("ppt/presentation.xml", &sname), false));
@@ -502,6 +591,15 @@ pub fn export(p: &Presentation) -> Result<Vec<u8>, PptxError> {
         w.close("p:cmAuthorLst");
         x.pkg.xml_part(name, CT_AUTHORS, w.finish());
         pres.rels.add("commentAuthors", "commentAuthors.xml", false);
+        // The modern authors part the threaded comments' authorId GUIDs point at.
+        let mut w = W::new();
+        w.open("p188:authorLst", A::new().a("xmlns:p188", NS_P188));
+        for (n, ini, _) in authors.iter() {
+            w.empty("p188:author", A::new().a("id", author_guid(n)).a("name", n).a("initials", ini).a("userId", "").a("providerId", "None"));
+        }
+        w.close("p188:authorLst");
+        x.pkg.xml_part("ppt/authors.xml", CT_AUTHORS_MODERN, w.finish());
+        pres.rels.add(RT_AUTHORS_MODERN, "authors.xml", false);
     }
 
     // Presentation-level parts.
@@ -515,7 +613,7 @@ pub fn export(p: &Presentation) -> Result<Vec<u8>, PptxError> {
     let ts = crate::tables::table_styles_xml(&x.table_styles, &p.table_styles);
     x.pkg.xml_part("ppt/tableStyles.xml", CT_TABLE_STYLES, ts);
     let pxml = presentation_xml(&mut x, &mut pres, &master_rids, notes_master_rid.as_deref(), &slide_rids);
-    x.pkg.xml_part("ppt/presentation.xml", CT_PRES, pxml);
+    x.pkg.xml_part("ppt/presentation.xml", main_ct, pxml);
     x.pkg.rels("ppt/presentation.xml", &pres.rels);
 
     // Document properties and package relationships.
@@ -565,7 +663,7 @@ fn master_xml(x: &mut Exp, o: &mut Out, m: &Master, layouts: &[(u64, String)]) -
     w.finish()
 }
 
-fn slide_xml(x: &mut Exp, o: &mut Out, s: &Slide) -> Vec<u8> {
+fn slide_xml(x: &mut Exp, o: &mut Out, s: &Slide, comment_rel: Option<&str>) -> Vec<u8> {
     let mut w = W::new();
     root_open(&mut w, "p:sld", A::new().o("showMasterSp", (!s.show_master_shapes).then_some("0")).o("show", s.hidden.then_some("0")));
     let ids = csld(&mut w, x, o, &s.name, s.background.as_ref(), &s.shapes);
@@ -576,7 +674,7 @@ fn slide_xml(x: &mut Exp, o: &mut Out, s: &Slide) -> Vec<u8> {
     if !s.animations.is_empty() {
         timing::timing(&mut w, x, &s.animations, &s.shapes, &ids);
     }
-    ext_list(&mut w, s.raw_ext.as_deref());
+    slide_ext_list(&mut w, s.raw_ext.as_deref(), comment_rel);
     w.close("p:sld");
     w.finish()
 }
@@ -618,15 +716,7 @@ fn comments_xml(list: &[Comment], authors: &mut Vec<(String, String, u32)>) -> V
         }
     }
     for c in flat {
-        let author = if c.author.is_empty() { "Author".to_string() } else { c.author.clone() };
-        let ai = match authors.iter().position(|(n, _, _)| *n == author) {
-            Some(i) => i,
-            None => {
-                let ini = if c.initials.is_empty() { author.chars().filter(|c| c.is_alphabetic()).take(2).collect() } else { c.initials.clone() };
-                authors.push((author.clone(), ini, 0));
-                authors.len() - 1
-            }
-        };
+        let ai = author_slot(c, authors);
         let idx = match authors.get_mut(ai) {
             Some(a) => {
                 a.2 += 1;
@@ -643,6 +733,87 @@ fn comments_xml(list: &[Comment], authors: &mut Vec<(String, String, u32)>) -> V
     }
     w.close("p:cmLst");
     w.finish()
+}
+
+/// The author's slot in the shared bucket list, adding them on first use. Legacy parts index the
+/// list by number, the modern authors part gives every slot a GUID.
+fn author_slot(c: &Comment, authors: &mut Vec<(String, String, u32)>) -> usize {
+    let author = if c.author.is_empty() { "Author".to_string() } else { c.author.clone() };
+    match authors.iter().position(|(n, _, _)| *n == author) {
+        Some(i) => i,
+        None => {
+            let ini = if c.initials.is_empty() { author.chars().filter(|ch| ch.is_alphabetic()).take(2).collect() } else { c.initials.clone() };
+            authors.push((author.clone(), ini, 0));
+            authors.len() - 1
+        }
+    }
+}
+
+/// The modern (p188) threaded-comment part: replies nest and the resolved state is kept, which
+/// the flattened legacy part cannot express (issue #70).
+fn modern_comments_xml(list: &[Comment], part: &str, authors: &mut Vec<(String, String, u32)>) -> Vec<u8> {
+    let mut w = W::new();
+    w.open("p188:cmLst", A::new().a("xmlns:p188", NS_P188));
+    for (ti, c) in list.iter().take(10_000).enumerate() {
+        modern_comment(&mut w, c, part, ti, authors, 0);
+    }
+    w.close("p188:cmLst");
+    w.finish()
+}
+
+fn modern_comment(w: &mut W, c: &Comment, part: &str, ti: usize, authors: &mut Vec<(String, String, u32)>, depth: usize) {
+    let ai = author_slot(c, authors);
+    let author = authors.get(ai).map(|(n, _, _)| n.clone()).unwrap_or_default();
+    let dt = if valid_date(&c.date) { c.date.clone() } else { "2024-01-01T00:00:00.000".into() };
+    let mut a = A::new().a("id", crate::tables::guid(&format!("deckcraft-comment:{part}:{ti}"))).a("authorId", author_guid(&author)).a("created", dt);
+    if c.resolved {
+        a = a.a("status", "resolved");
+    }
+    w.open("p188:cm", a);
+    w.empty0("p188:unknownAnchor");
+    let emu = |v: f64| if v.is_finite() { (v * 12_700.0).round().clamp(0.0, 1.0e9) as i64 } else { 0 };
+    w.empty("p188:pos", A::new().a("x", emu(c.x)).a("y", emu(c.y)));
+    if depth < 4 && !c.replies.is_empty() {
+        w.open0("p188:replyLst");
+        for (ri, r) in c.replies.iter().take(1000).enumerate() {
+            let ri_ai = author_slot(r, authors);
+            let r_author = authors.get(ri_ai).map(|(n, _, _)| n.clone()).unwrap_or_default();
+            let rdt = if valid_date(&r.date) { r.date.clone() } else { "2024-01-01T00:00:00.000".into() };
+            let mut ra = A::new()
+                .a("id", crate::tables::guid(&format!("deckcraft-comment:{part}:{ti}:{ri}")))
+                .a("authorId", author_guid(&r_author))
+                .a("created", rdt);
+            if r.resolved {
+                ra = ra.a("status", "resolved");
+            }
+            w.open("p188:reply", ra);
+            tx_body(w, &r.text);
+            w.close("p188:reply");
+        }
+        w.close("p188:replyLst");
+    }
+    tx_body(w, &c.text);
+    w.close("p188:cm");
+}
+
+/// An `a:txBody` with one paragraph per line, the shape the reader re-joins with `\n`.
+fn tx_body(w: &mut W, text: &str) {
+    w.open0("p188:txBody");
+    w.empty0("a:bodyPr");
+    for line in text.split('\n') {
+        w.open0("a:p");
+        w.open0("a:r");
+        w.empty("a:rPr", A::new().a("lang", "en-US"));
+        w.elt("a:t", line);
+        w.close("a:r");
+        w.close("a:p");
+    }
+    w.close("p188:txBody");
+}
+
+/// The modern author id for a name: the same GUID the authors part writes.
+fn author_guid(name: &str) -> String {
+    crate::tables::guid(&format!("deckcraft-comment-author:{name}"))
 }
 
 /// Sections with every slide in exactly one section, in slide order.
@@ -665,11 +836,99 @@ fn section_slides(p: &Presentation) -> Vec<(String, Vec<usize>)> {
     out
 }
 
+/// One embedded typeface, with the relationship id of each face that had bytes.
+struct WrittenFont {
+    typeface: String,
+    panose: Option<String>,
+    pitch_family: Option<u8>,
+    charset: Option<u8>,
+    regular: Option<String>,
+    bold: Option<String>,
+    italic: Option<String>,
+    bold_italic: Option<String>,
+}
+
+impl WrittenFont {
+    fn any(&self) -> bool {
+        self.regular.is_some() || self.bold.is_some() || self.italic.is_some() || self.bold_italic.is_some()
+    }
+}
+
+/// Font parts for `p:embeddedFontLst`. One part per distinct media item, named `ppt/fonts/fontN.fntdata`.
+fn write_embedded_fonts(x: &mut Exp, o: &mut Out) -> Vec<WrittenFont> {
+    struct Plan {
+        typeface: String,
+        panose: Option<String>,
+        pitch_family: Option<u8>,
+        charset: Option<u8>,
+        regular: Option<MediaId>,
+        bold: Option<MediaId>,
+        italic: Option<MediaId>,
+        bold_italic: Option<MediaId>,
+    }
+    let mut plans = Vec::new();
+    for font in x.p.embedded_fonts.iter().take(64) {
+        let typeface = font.typeface.trim();
+        if typeface.is_empty() {
+            continue;
+        }
+        plans.push(Plan {
+            typeface: typeface.chars().take(255).collect(),
+            panose: font.panose.clone().filter(|s| s.len() == 20 && s.chars().all(|c| c.is_ascii_hexdigit())),
+            pitch_family: font.pitch_family,
+            charset: font.charset,
+            regular: font.regular,
+            bold: font.bold,
+            italic: font.italic,
+            bold_italic: font.bold_italic,
+        });
+    }
+    let mut seen_part: HashMap<MediaId, String> = HashMap::new();
+    let mut n = 0u32;
+    let mut rel = |x: &mut Exp, o: &mut Out, id: Option<MediaId>| -> Option<String> {
+        let id = id?;
+        if let Some(rid) = seen_part.get(&id) {
+            return Some(rid.clone());
+        }
+        let m = x.p.media(id)?;
+        if m.data.is_empty() || m.data.len() > 32 * 1024 * 1024 {
+            return None;
+        }
+        let bytes = m.data.as_ref().clone();
+        n = n.saturating_add(1);
+        let name = format!("ppt/fonts/font{n}.fntdata");
+        x.pkg.binary(&name, "application/x-fontdata", bytes);
+        let rid = o.rels.add("font", &opc::relative("ppt/presentation.xml", &name), false);
+        seen_part.insert(id, rid.clone());
+        Some(rid)
+    };
+    let mut seen_face = Vec::new();
+    let mut out = Vec::new();
+    for font in plans {
+        let written = WrittenFont {
+            typeface: font.typeface,
+            panose: font.panose,
+            pitch_family: font.pitch_family,
+            charset: font.charset,
+            regular: rel(x, o, font.regular),
+            bold: rel(x, o, font.bold),
+            italic: rel(x, o, font.italic),
+            bold_italic: rel(x, o, font.bold_italic),
+        };
+        if written.any() && !seen_face.iter().any(|s| s == &written.typeface) {
+            seen_face.push(written.typeface.clone());
+            out.push(written);
+        }
+    }
+    out
+}
+
 fn presentation_xml(x: &mut Exp, o: &mut Out, masters: &[(u64, String)], notes: Option<&str>, slides: &[String]) -> Vec<u8> {
+    let fonts = write_embedded_fonts(x, o);
     let p = x.p;
     let mut w = W::new();
     let first = (p.first_slide_number != 1).then_some(p.first_slide_number.min(9999));
-    root_open(&mut w, "p:presentation", A::new().a("saveSubsetFonts", 1).o("firstSlideNum", first));
+    root_open(&mut w, "p:presentation", A::new().a("saveSubsetFonts", 1).t("embedTrueTypeFonts", !fonts.is_empty()).o("firstSlideNum", first));
     w.open0("p:sldMasterIdLst");
     for (id, rid) in masters {
         w.empty("p:sldMasterId", A::new().a("id", id).a("r:id", rid));
@@ -690,6 +949,23 @@ fn presentation_xml(x: &mut Exp, o: &mut Out, masters: &[(u64, String)], notes: 
     let clamp = |v: f64| dml::emu(v).clamp(914_400, 51_206_400);
     w.empty("p:sldSz", A::new().a("cx", clamp(p.slide_size.width)).a("cy", clamp(p.slide_size.height)));
     w.empty("p:notesSz", A::new().a("cx", dml::emu_pos(p.notes_size.width).max(1)).a("cy", dml::emu_pos(p.notes_size.height).max(1)));
+    if !fonts.is_empty() {
+        w.open0("p:embeddedFontLst");
+        for f in &fonts {
+            w.open0("p:embeddedFont");
+            w.empty(
+                "p:font",
+                A::new().a("typeface", &f.typeface).o("panose", f.panose.clone()).o("pitchFamily", f.pitch_family).o("charset", f.charset),
+            );
+            for (tag, rid) in [("p:regular", &f.regular), ("p:bold", &f.bold), ("p:italic", &f.italic), ("p:boldItalic", &f.bold_italic)] {
+                if let Some(rid) = rid {
+                    w.empty(tag, A::new().a("r:id", rid));
+                }
+            }
+            w.close("p:embeddedFont");
+        }
+        w.close("p:embeddedFontLst");
+    }
     if !p.custom_shows.is_empty() {
         w.open0("p:custShowLst");
         for (i, cs) in p.custom_shows.iter().enumerate() {

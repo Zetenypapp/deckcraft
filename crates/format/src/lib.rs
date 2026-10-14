@@ -96,8 +96,15 @@ fn read_entry(z: &mut zip::ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<Vec<
     Ok(out)
 }
 
-/// Read a presentation.
+/// Read a presentation. Embedded media that is missing or damaged is left empty; use
+/// [`load_checked`] to learn which.
 pub fn load(bytes: &[u8]) -> Result<Presentation> {
+    load_checked(bytes).map(|(p, _)| p)
+}
+
+/// Read a presentation and list the embedded media that couldn't be read (missing, too large
+/// or failing its CRC), one message each. Linked media saved without its bytes isn't damage.
+pub fn load_checked(bytes: &[u8]) -> Result<(Presentation, Vec<String>)> {
     let mut z = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| FormatError::NotOurs(e.to_string()))?;
     let json = read_entry(&mut z, "presentation.json").map_err(|_| FormatError::NotOurs("no presentation.json".into()))?;
     let m: Manifest = serde_json::from_slice(&json).map_err(|e| FormatError::Damaged(e.to_string()))?;
@@ -105,13 +112,18 @@ pub fn load(bytes: &[u8]) -> Result<Presentation> {
         return Err(FormatError::NotOurs(m.format));
     }
     let mut p = m.presentation;
+    let mut damaged = vec![];
     for item in &mut p.media {
-        if let Ok(data) = read_entry(&mut z, &format!("media/{}", item.id.0)) {
-            item.data = Arc::new(data);
+        let name = format!("media/{}", item.id.0);
+        let linked_only = item.link.is_some() && z.index_for_name(&name).is_none();
+        match read_entry(&mut z, &name) {
+            Ok(data) => item.data = Arc::new(data),
+            Err(_) if linked_only => {}
+            Err(e) => damaged.push(e.to_string()),
         }
     }
     repair(&mut p);
-    Ok(p)
+    Ok((p, damaged))
 }
 
 /// Make a loaded presentation safe to edit: a master exists, every slide's layout exists,
@@ -147,18 +159,35 @@ pub fn repair(p: &mut Presentation) {
     p.slide_size.height = p.slide_size.height.min(4000.0);
 }
 
+/// Slides read from an outline: each title with its body paragraphs (level 0–8, text).
+type OutlineSlides = Vec<(String, Vec<(u8, String)>)>;
+
+/// Append a Title and Content slide per outline entry; the number made.
+fn add_outline_slides(p: &mut Presentation, slides: OutlineSlides) -> usize {
+    let Some(lay) = defaults::layout_of_kind(p, LayoutType::TitleAndContent) else { return 0 };
+    let made = slides.len();
+    for (title, body) in slides {
+        let mut s = defaults::new_slide(p, lay);
+        if let Some(t) = s.shapes.first_mut() {
+            t.text = Some(TextBody::from_text(&title));
+        }
+        if let Some(b) = s.shapes.get_mut(1) {
+            for (level, line) in body {
+                let tb = b.text.get_or_insert_with(TextBody::default);
+                let mut para = Paragraph::new(&line);
+                para.level = level.min(8);
+                tb.paragraphs.push(para);
+            }
+        }
+        p.slides.push(Arc::new(s));
+    }
+    made
+}
+
 /// Outline text: one slide per unindented line; tab-indented lines become body bullets at their
 /// level (Insert ▸ Slides from Outline, View ▸ Outline copy).
 pub fn outline_to_slides(p: &mut Presentation, text: &str) -> usize {
-    let Some(lay) = defaults::layout_of_kind(p, LayoutType::TitleAndContent) else { return 0 };
-    let mut made = 0;
-    let mut cur: Option<deckcraft_model::Slide> = None;
-    let flush = |p: &mut Presentation, s: Option<deckcraft_model::Slide>, made: &mut usize| {
-        if let Some(s) = s {
-            p.slides.push(Arc::new(s));
-            *made += 1;
-        }
-    };
+    let mut slides: OutlineSlides = Vec::new();
     for raw in text.lines() {
         if raw.trim().is_empty() {
             continue;
@@ -166,25 +195,69 @@ pub fn outline_to_slides(p: &mut Presentation, text: &str) -> usize {
         let tabs = raw.chars().take_while(|c| *c == '\t').count();
         let spaces = raw.chars().take_while(|c| *c == ' ').count() / 2;
         let level = tabs.max(spaces);
-        let line = raw.trim().trim_start_matches(['-', '*', '•']).trim();
+        let line = raw.trim().trim_start_matches(['-', '*', '•']).trim().to_string();
         if level == 0 {
-            flush(p, cur.take(), &mut made);
-            let mut s = defaults::new_slide(p, lay);
-            if let Some(t) = s.shapes.first_mut() {
-                t.text = Some(TextBody::from_text(line));
-            }
-            cur = Some(s);
-        } else if let Some(s) = cur.as_mut()
-            && let Some(body) = s.shapes.get_mut(1)
-        {
-            let tb = body.text.get_or_insert_with(TextBody::default);
-            let mut para = Paragraph::new(line);
-            para.level = (level - 1).min(8) as u8;
-            tb.paragraphs.push(para);
+            slides.push((line, Vec::new()));
+        } else if let Some((_, body)) = slides.last_mut() {
+            body.push(((level - 1).min(8) as u8, line));
         }
     }
-    flush(p, cur, &mut made);
-    made
+    add_outline_slides(p, slides)
+}
+
+/// An ATX heading's text (CommonMark: up to three spaces, one to six `#`, then a space or the end;
+/// a closing run of `#` is dropped).
+fn md_heading(line: &str) -> Option<&str> {
+    let t = line.strip_prefix("   ").or_else(|| line.strip_prefix("  ")).or_else(|| line.strip_prefix(' ')).unwrap_or(line);
+    let hashes = t.chars().take_while(|c| *c == '#').count();
+    let rest = t.get(hashes..)?;
+    if !(1..=6).contains(&hashes) || !(rest.is_empty() || rest.starts_with([' ', '\t'])) {
+        return None;
+    }
+    let rest = rest.trim();
+    let closed = rest.trim_end_matches('#');
+    Some(if closed.is_empty() || closed.ends_with([' ', '\t']) { closed.trim_end() } else { rest })
+}
+
+/// A list item's nesting level (two spaces or a tab each) and text: `-`, `*` or `+`, or digits
+/// then `.` or `)`, followed by a space.
+fn md_list_item(line: &str) -> Option<(u8, &str)> {
+    let indent: usize = line.chars().take_while(|c| matches!(c, ' ' | '\t')).map(|c| if c == '\t' { 2 } else { 1 }).sum();
+    let t = line.trim_start();
+    let rest = match t.strip_prefix(['-', '*', '+']) {
+        Some(r) => r,
+        None => {
+            let digits = t.chars().take_while(char::is_ascii_digit).count();
+            if digits == 0 || digits > 9 {
+                return None;
+            }
+            t.get(digits..)?.strip_prefix(['.', ')'])?
+        }
+    };
+    rest.starts_with([' ', '\t']).then(|| ((indent / 2).min(8) as u8, rest.trim()))
+}
+
+/// Markdown outline text (`.md`): each heading starts a slide with its text as the title; list
+/// items under it become bullets nested by their indentation, other lines body paragraphs. Text
+/// before the first heading is skipped, as indented lines before the first title are in the
+/// plain format. A file without headings is read as a plain outline ([`outline_to_slides`]).
+pub fn markdown_to_slides(p: &mut Presentation, text: &str) -> usize {
+    if !text.lines().any(|l| md_heading(l).is_some()) {
+        return outline_to_slides(p, text);
+    }
+    let mut slides: OutlineSlides = Vec::new();
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Some(title) = md_heading(line) {
+            slides.push((title.to_string(), Vec::new()));
+        } else if let Some((_, body)) = slides.last_mut() {
+            let (level, text) = md_list_item(line).unwrap_or((0, line.trim()));
+            body.push((level, text.to_string()));
+        }
+    }
+    add_outline_slides(p, slides)
 }
 
 /// The deck as outline text (titles unindented, body paragraphs tab-indented by level).
@@ -217,6 +290,44 @@ pub fn slides_to_outline(p: &Presentation) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The same package without the entries `drop` names.
+    fn without(bytes: &[u8], drop: &str) -> Vec<u8> {
+        let mut z = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for i in 0..z.len() {
+            let f = z.by_index(i).unwrap();
+            if f.name() != drop {
+                out.raw_copy_file(f).unwrap();
+            }
+        }
+        out.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn missing_or_corrupt_media_is_reported() {
+        let mut p = Presentation::default();
+        let id = p.add_media("a.png", "image/png", b"PICTURE-BYTES-0123456789".to_vec());
+        let good = save(&p).unwrap();
+        assert!(load_checked(&good).unwrap().1.is_empty());
+        // Missing member.
+        let (q, damaged) = load_checked(&without(&good, &format!("media/{}", id.0))).unwrap();
+        assert_eq!(damaged.len(), 1, "{damaged:?}");
+        assert!(q.media(id).is_some_and(|m| m.data.is_empty()));
+        // Bad CRC: PNGs are stored, so their bytes sit in the file as they are.
+        let mut bad = good.clone();
+        let at = bad.windows(13).position(|w| w == b"PICTURE-BYTES").unwrap();
+        bad[at] ^= 0xff;
+        let (_, damaged) = load_checked(&bad).unwrap();
+        assert_eq!(damaged.len(), 1, "{damaged:?}");
+        // Linked media saved without its bytes isn't damage.
+        let mut l = Presentation::default();
+        let lid = l.add_media("v.mp4", "video/mp4", vec![]);
+        if let Some(m) = l.media.iter_mut().find(|m| m.id == lid) {
+            m.link = Some("file:///movies/v.mp4".into());
+        }
+        assert!(load_checked(&save(&l).unwrap()).unwrap().1.is_empty());
+    }
 
     #[test]
     fn roundtrip_with_media() {
@@ -258,5 +369,24 @@ mod tests {
         assert_eq!(n, 2);
         let o = slides_to_outline(&p);
         assert!(o.contains("Intro\n\tPoint one\n\t\tSub point\nSecond"), "{o}");
+    }
+
+    #[test]
+    fn markdown_headings_and_list_items() {
+        assert_eq!(md_heading("# Intro"), Some("Intro"));
+        assert_eq!(md_heading("   ### Deep ###  "), Some("Deep"));
+        assert_eq!(md_heading("## C# and F#"), Some("C# and F#"));
+        assert_eq!(md_heading("#"), Some(""));
+        assert_eq!(md_heading("## Ünïcödé"), Some("Ünïcödé"));
+        for not in ["#5 priority", "####### seven", "    # code", "text", "", "é#"] {
+            assert_eq!(md_heading(not), None, "{not:?}");
+        }
+        assert_eq!(md_list_item("- a"), Some((0, "a")));
+        assert_eq!(md_list_item("    * b"), Some((2, "b")));
+        assert_eq!(md_list_item("\t+ c"), Some((1, "c")));
+        assert_eq!(md_list_item("12) d"), Some((0, "d")));
+        for not in ["-x", "1.x", "1", "1234567890. long", "• bullet", "é. x", ""] {
+            assert_eq!(md_list_item(not), None, "{not:?}");
+        }
     }
 }

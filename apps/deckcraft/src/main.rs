@@ -14,6 +14,8 @@
 
 mod audio;
 mod control_server;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod display;
 #[cfg(any(target_os = "windows", test))]
 mod graphics;
 mod logging;
@@ -35,6 +37,16 @@ impl eframe::App for App {
     }
     fn on_exit(&mut self) {
         save_prefs(&self.0);
+        // macOS (#279): end the process here, before eframe tears the window down. AccessKit's
+        // macOS adapter subclasses the window's content view and restores its class on teardown;
+        // AppKit's Touch Bar support observes that view (KVO), so in the next display cycle
+        // `-[_NSTouchBarFinderObservation invalidate]` throws "not registered" and the quit ends
+        // in a crash report. eframe calls `on_exit` on every way of quitting (⌘Q, the close
+        // button, `app.quit`), once the unsaved-changes prompt has let the window close, and
+        // nothing after it is needed: the preferences are saved and the log file is unbuffered.
+        // `on_exit` only runs once the app exists, never on a failed start. Same as GridCraft #117.
+        #[cfg(target_os = "macos")]
+        std::process::exit(0);
     }
 }
 
@@ -185,15 +197,26 @@ fn main() -> eframe::Result {
         options.viewport = options.viewport.with_icon(icon);
     }
     #[cfg(all(unix, not(target_os = "macos")))]
-    if std::env::var_os("DISPLAY").is_some() && std::env::var_os("DECKCRAFT_WAYLAND").is_none() {
+    let x11 = match display::choose_from_env() {
+        display::Choice::X11 => true,
+        display::Choice::Default => false,
+        display::Choice::None => {
+            // winit's own error says little to someone who started DeckCraft from a console.
+            log::error!("no display: DISPLAY and WAYLAND_DISPLAY are not set");
+            eprintln!("DeckCraft needs a graphical session: neither DISPLAY nor WAYLAND_DISPLAY is set.");
+            false
+        }
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if x11 {
         options.event_loop_builder = Some(Box::new(|b| {
             use winit::platform::x11::EventLoopBuilderExtX11;
             b.with_x11();
         }));
     }
-    // Before eframe creates the wgpu instance: default Windows to DirectX 12 only (see graphics.rs).
+    // Before eframe creates the wgpu instance: default Windows to DirectX 12 with FXC (see graphics.rs).
     #[cfg(target_os = "windows")]
-    graphics::configure(&mut options, eframe::wgpu::Backends::from_env());
+    graphics::configure(&mut options, eframe::wgpu::Backends::from_env(), eframe::wgpu::Dx12Compiler::from_env());
     eframe::run_native(
         "DeckCraft",
         options,
@@ -230,4 +253,32 @@ fn main() -> eframe::Result {
             Ok(Box::new(App(app)))
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #279: on macOS the process ends inside `on_exit`, before eframe would tear the window down.
+    /// The check runs in a child (this test binary again), since on macOS it ends the process.
+    #[test]
+    fn on_exit_ends_the_process_on_macos() {
+        if std::env::var_os("DECKCRAFT_TEST_ON_EXIT").is_some() {
+            let mut app = App(SlideApp::new(Session::new(), Services::default()));
+            println!("calling on_exit");
+            eframe::App::on_exit(&mut app);
+            println!("on_exit returned");
+            return;
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tests::on_exit_ends_the_process_on_macos", "--nocapture"])
+            .env("DECKCRAFT_TEST_ON_EXIT", "1")
+            .env("DECKCRAFT_NO_PREFS", "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "{stdout}");
+        assert!(stdout.contains("calling on_exit"), "the child didn't run the test: {stdout}");
+        assert_eq!(stdout.contains("on_exit returned"), !cfg!(target_os = "macos"), "{stdout}");
+    }
 }

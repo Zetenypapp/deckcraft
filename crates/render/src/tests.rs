@@ -156,6 +156,28 @@ fn combo_chart_draws_columns_and_a_line_on_its_own_axis() {
 }
 
 #[test]
+fn chart_axis_titles_are_drawn() {
+    let draw = |titles: (Option<String>, Option<String>)| {
+        let mut c = Chart::sample(ChartType::Column);
+        c.title = None;
+        c.legend = None;
+        c.axis_titles = titles;
+        let sh = Shape { id: ShapeId(624), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+        render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() })
+    };
+    let ink = |img: &Image, r: (u32, u32, u32, u32)| {
+        (r.0..r.2).flat_map(|x| (r.1..r.3).map(move |y| (x, y))).filter(|(x, y)| img.pixel(*x, *y)[0] < 160).count()
+    };
+    let bare = draw((None, None));
+    let titled = draw((Some("Month".into()), Some("Revenue".into())));
+    // A turned "Revenue" down the left edge, "Month" along the bottom.
+    let left = (38, 150, 62, 390);
+    let bottom = (380, 490, 580, 520);
+    assert!(ink(&titled, left) > ink(&bare, left) + 30, "value axis title");
+    assert!(ink(&titled, bottom) > ink(&bare, bottom) + 30, "category axis title");
+}
+
+#[test]
 fn placeholder_prompts_only_in_edit_view() {
     let p = Presentation::default();
     let edit = render_slide(&p, 0, &RenderOpts { scale: 0.5, edit: true, ..Default::default() });
@@ -539,7 +561,13 @@ fn hyperlinks_draw_in_the_hyperlink_colour_underlined() {
     let o = RenderOpts { scale: 0.5, ..Default::default() };
     let px = |p: &Presentation| render_slide(p, 0, &o);
     let diff = |a: &Image, b: &Image| a.pixels.iter().zip(&b.pixels).filter(|(x, y)| x.abs_diff(**y) > 64).count();
-    let link = Some(Hyperlink { action: Action::Url { url: "https://example.org".into() }, tooltip: String::new(), highlight_click: false });
+    let link = Some(Hyperlink {
+        action: Action::Url { url: "https://example.org".into() },
+        tooltip: String::new(),
+        highlight_click: false,
+        sound: None,
+        stop_sound: false,
+    });
     let hlink = Some(Fill::solid(ColorRef::scheme(deckcraft_color::SchemeSlot::Hlink)));
     let red = Some(Fill::solid(ColorRef::rgb(Rgba::rgb(200, 0, 0))));
     let _ = px(&run_deck(RunProps::default())); // faces load lazily
@@ -1710,4 +1738,221 @@ fn east_asian_vertical_text_stands_ideographs_upright() {
     assert!(w > h * 3, "eaVert: upright stroke {w}x{h}");
     let (w, h) = ink(deckcraft_model::text::TextDir::Vertical);
     assert!(h > w * 3, "vert: stroke on its side {w}x{h}");
+}
+
+#[test]
+fn placed_shapes_give_the_click_boxes_of_a_slide_in_drawing_order() {
+    use deckcraft_model::text::{Action, Hyperlink};
+    let link = Hyperlink { action: Action::NextSlide, tooltip: String::new(), highlight_click: false, sound: None, stop_sound: false };
+    let rect = |id: u32, x: f64, click: Option<Hyperlink>| Shape {
+        id: ShapeId(id),
+        xfrm: Some(Xfrm::new(x, 50.0, 100.0, 40.0)),
+        click,
+        ..Default::default()
+    };
+    let group = Shape {
+        id: ShapeId(10),
+        xfrm: Some(Xfrm::new(300.0, 50.0, 200.0, 40.0)),
+        click: Some(link.clone()),
+        kind: ShapeKind::Group { children: vec![rect(11, 0.0, None), rect(12, 100.0, None)], child: Xfrm::new(0.0, 0.0, 200.0, 40.0) },
+        ..Default::default()
+    };
+    let hidden = Shape { hidden: true, ..rect(13, 0.0, Some(link.clone())) };
+    let p = deck_with(vec![rect(1, 0.0, None), rect(2, 150.0, Some(link.clone())), hidden, group]);
+    let placed = place_slide(&p, 0);
+    // Back to front, a group before its children; the hidden shape is not there.
+    let ids: Vec<u32> = placed.shapes.iter().map(|s| s.id.0).collect();
+    assert_eq!(ids, vec![1, 2, 10, 11, 12]);
+    // Only the shapes with an action carry a link.
+    let linked: Vec<u32> = placed.shapes.iter().filter(|s| s.link.is_some()).map(|s| s.id.0).collect();
+    assert_eq!(linked, vec![2, 10]);
+    // The children know their group, whose box covers them.
+    let group = &placed.shapes[2];
+    assert!(group.is_group && group.parent.is_none());
+    for child in &placed.shapes[3..] {
+        assert_eq!(child.parent, Some(2));
+        assert!(child.rect.x0 >= group.rect.x0 - 0.01 && child.rect.x1 <= group.rect.x1 + 0.01);
+    }
+    // Shape actions come out as links owned by their shape, not as text links.
+    assert!(placed.links.iter().all(|l| !l.text));
+    assert_eq!(placed.links.iter().map(|l| l.shape.0).collect::<Vec<_>>(), vec![2, 10]);
+}
+
+#[test]
+fn a_text_hyperlink_belongs_to_the_shape_that_holds_the_text() {
+    use deckcraft_model::text::{Action, Hyperlink};
+    let mut body = TextBody::from_text("click here");
+    for r in &mut body.paragraphs[0].runs {
+        r.props.link = Some(Hyperlink { action: Action::FirstSlide, tooltip: String::new(), highlight_click: false, sound: None, stop_sound: false });
+    }
+    let sh = Shape { id: ShapeId(7), xfrm: Some(Xfrm::new(100.0, 100.0, 300.0, 60.0)), text: Some(body), ..Default::default() };
+    let placed = place_slide(&deck_with(vec![sh]), 0);
+    assert!(placed.links.iter().any(|l| l.text && l.shape == ShapeId(7)));
+    assert!(placed.shapes.iter().all(|s| s.link.is_none()), "a text link is not the shape's own action");
+}
+
+#[test]
+fn metafile_intersect_clip_rect_hides_the_rest_of_the_picture() {
+    let rec = |typ: u32, payload: &[u8]| {
+        let mut v = typ.to_le_bytes().to_vec();
+        v.extend(((8 + payload.len()) as u32).to_le_bytes());
+        v.extend(payload);
+        v
+    };
+    let rect = |l: i32, t: i32, r: i32, b: i32| [l, t, r, b].into_iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<_>>();
+    let mut body = rec(30, &rect(0, 0, 50, 50));
+    body.extend(rec(43, &rect(0, 0, 100, 50)));
+    let eof = rec(14, &[0; 12]);
+    let total = 88 + body.len() + eof.len();
+    let mut file = vec![0u8; 88];
+    file[0..4].copy_from_slice(&1u32.to_le_bytes());
+    file[4..8].copy_from_slice(&88u32.to_le_bytes());
+    file[8..24].copy_from_slice(&rect(0, 0, 100, 50));
+    file[40..44].copy_from_slice(&0x464D_4520u32.to_le_bytes());
+    file[44..48].copy_from_slice(&0x0001_0000u32.to_le_bytes());
+    file[48..52].copy_from_slice(&(total as u32).to_le_bytes());
+    file[52..56].copy_from_slice(&2u32.to_le_bytes());
+    file[56..58].copy_from_slice(&1u16.to_le_bytes());
+    file.extend(body);
+    file.extend(eof);
+    let img = crate::metafile::rasterize(&file, 100).expect("raster");
+    let opaque = |x: u32, y: u32| img.get_pixel(x, y)[3] > 200;
+    assert!(opaque(20, 25), "the clipped half is drawn");
+    assert!(!opaque(80, 25), "past the clip the picture stays clear, pixel {:?}", img.get_pixel(80, 25));
+}
+
+#[test]
+fn tiny_chart_does_not_blank_the_slide() {
+    // A chart a few points wide used to panic in `f64::clamp` (gutter min above max), and the
+    // panic guard then blanked the whole slide. Render directly, without the guard.
+    let red = Shape {
+        id: ShapeId(800),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 200.0, 100.0)),
+        style: Some(ShapeStyle::accent(deckcraft_color::SchemeSlot::Accent1)),
+        ..Default::default()
+    };
+    let mut shapes = vec![red];
+    for (i, k) in [ChartType::Column, ChartType::Bar, ChartType::Line, ChartType::Combo, ChartType::Scatter].iter().enumerate() {
+        shapes.push(Shape {
+            id: ShapeId(801 + i as u32),
+            xfrm: Some(Xfrm::new(500.0 + i as f64 * 5.0, 300.0, 0.9, 0.9)),
+            kind: ShapeKind::Chart(Box::new(Chart::sample(*k))),
+            ..Default::default()
+        });
+    }
+    let p = deck_with(shapes);
+    let img = RENDERER.with(|r| r.borrow_mut().slide(&p, &p.slides[0], 0, &RenderOpts { scale: 1.0, ..Default::default() }));
+    let px = img.pixel(200, 150);
+    assert_ne!(px, [255, 255, 255, 255], "the other shape must still draw");
+    assert_eq!(crate::chart::clamp_soft(5.0, 10.5, 0.276), 0.276);
+}
+
+/// Shapes with depth under turned cameras (an `extrusionH` and, on two, an `extrusionClr`).
+fn extruded_deck() -> Presentation {
+    let mk = |id: u32, x: f64, preset: &str, raw: &str| Shape {
+        id: ShapeId(id),
+        xfrm: Some(Xfrm::new(x, 170.0, 170.0, 130.0)),
+        geom: Geom::preset(preset),
+        style: Some(ShapeStyle::accent(deckcraft_color::SchemeSlot::Accent1)),
+        effects: Some(deckcraft_model::Effects { raw3d: Some(raw.into()), ..Default::default() }),
+        ..Default::default()
+    };
+    deck_with(vec![
+        mk(
+            700,
+            40.0,
+            "rect",
+            r#"<a:scene3d><a:camera prst="isometricOffAxis2Left"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d extrusionH="381000"/>"#,
+        ),
+        mk(
+            701,
+            280.0,
+            "ellipse",
+            r#"<a:scene3d><a:camera prst="isometricTopUp"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d extrusionH="254000" contourW="63500"><a:extrusionClr><a:srgbClr val="C00000"/></a:extrusionClr><a:contourClr><a:srgbClr val="FFC000"/></a:contourClr></a:sp3d>"#,
+        ),
+        mk(
+            702,
+            520.0,
+            "star5",
+            r#"<a:scene3d><a:camera prst="perspectiveContrastingLeftFacing"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d extrusionH="508000"><a:extrusionClr><a:schemeClr val="accent2"/></a:extrusionClr></a:sp3d>"#,
+        ),
+        mk(
+            703,
+            760.0,
+            "rect",
+            r#"<a:scene3d><a:camera prst="orthographicFront"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d extrusionH="381000" contourW="76200" prstMaterial="metal"><a:contourClr><a:srgbClr val="00B050"/></a:contourClr></a:sp3d>"#,
+        ),
+    ])
+}
+
+#[test]
+fn contours_band_the_outline_in_their_colour() {
+    let img = render_slide(&extruded_deck(), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let n = |x0: u32, x1: u32, f: &dyn Fn([u8; 4]) -> bool| {
+        let mut k = 0;
+        for y in 0..img.height {
+            for x in x0..x1.min(img.width) {
+                let i = ((y * img.width + x) * 4) as usize;
+                if img.pixels.get(i..i + 4).and_then(|p| <[u8; 4]>::try_from(p).ok()).is_some_and(f) {
+                    k += 1;
+                }
+            }
+        }
+        k
+    };
+    // The ellipse's yellow contour and the flat rectangle's green one.
+    assert!(n(260, 480, &|p| p[0] > 200 && (150..230).contains(&p[1]) && p[2] < 80) > 200);
+    assert!(n(740, 960, &|p| p[0] < 80 && p[1] > 120 && p[2] < 120) > 300);
+}
+
+#[test]
+fn extrusions_show_their_sides_under_a_turned_camera() {
+    let p = extruded_deck();
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    if let Ok(path) = std::env::var("DECKCRAFT_PNG_OUT") {
+        let _ = std::fs::write(path, img.to_png());
+    }
+    let count = |x0: u32, x1: u32, f: &dyn Fn([u8; 4]) -> bool| {
+        (x0..x1).flat_map(|x| (100..400).map(move |y| (x, y))).filter(|(x, y)| f(img.pixel(*x, *y))).count()
+    };
+    // The red sides of the ellipse; the dark accent-1 sides of the cube; none for a front camera.
+    assert!(count(250, 500, &|c| c[0] > 100 && c[1] < 40 && c[2] < 40) > 300, "red extrusion");
+    let flat = render_slide(&deck_with(vec![]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let ink = |img: &Image, x0: u32, x1: u32| {
+        (x0..x1).flat_map(|x| (100..400).map(move |y| (x, y))).filter(|(x, y)| img.pixel(*x, *y) != [255, 255, 255, 255]).count()
+    };
+    let mut no_depth = extruded_deck();
+    for sh in &mut std::sync::Arc::make_mut(&mut no_depth.slides[0]).shapes {
+        if let Some(fx) = sh.effects.as_mut() {
+            fx.raw3d = fx.raw3d.as_ref().map(|r| r.replace(" extrusionH=", " x="));
+        }
+    }
+    let thin = render_slide(&no_depth, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    assert!(ink(&img, 0, 260) > ink(&thin, 0, 260) + 1000, "the cube's sides add ink");
+    assert_eq!(ink(&img, 740, 960), ink(&thin, 740, 960), "a front camera shows no sides");
+    assert_eq!(ink(&flat, 0, 960), 0);
+}
+
+#[test]
+fn table_rows_below_the_slide_are_not_laid_out_and_the_slide_looks_the_same() {
+    // A fuzzed deck's 200 x 200 table of long text took 70 s to draw, most of it off the slide.
+    let table = |rows: usize| {
+        let mut t = Table::new(rows, 2, 400.0, 30.0);
+        for r in 0..rows {
+            for c in 0..2 {
+                t.cell_mut(r, c).unwrap().text = TextBody::from_text(&format!("Row {r} col {c}"));
+            }
+        }
+        Shape { id: ShapeId(611), xfrm: Some(Xfrm::new(50.0, 50.0, 400.0, 30.0 * rows as f64)), kind: ShapeKind::Table(t), ..Default::default() }
+    };
+    let opts = RenderOpts { scale: 0.5, ..Default::default() };
+    crate::table::TEXT_CELLS_DRAWN.with(|n| n.set(0));
+    let big = render_slide(&deck_with(vec![table(500)]), 0, &opts);
+    let drawn = crate::table::TEXT_CELLS_DRAWN.with(|n| n.get());
+    assert!(drawn > 2 * 10 && drawn < 2 * 40, "{drawn} cells drawn");
+    // 30 rows already run past the slide's bottom: the same picture.
+    let small = render_slide(&deck_with(vec![table(30)]), 0, &opts);
+    assert_eq!((big.width, big.height), (small.width, small.height));
+    let diff = (0..big.height).flat_map(|y| (0..big.width).map(move |x| (x, y))).filter(|&(x, y)| big.pixel(x, y) != small.pixel(x, y)).count();
+    assert_eq!(diff, 0);
 }

@@ -789,3 +789,107 @@ fn show_follows_links() {
     assert_eq!(s.follow(&p, &Action::LastViewed, None), LinkJump::None);
     assert_eq!(s.slide, 3);
 }
+
+/// #420: late in the Honeycomb every cell has settled, so the incoming hexagons must cover the
+/// whole slide — the old row count stopped at ~75% of a 16:9 slide and left the bottom black.
+#[test]
+fn honeycomb_cells_reach_the_bottom_before_the_slide_ends() {
+    let sign = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| (a[0] - c[0]) * (b[1] - c[1]) - (b[0] - c[0]) * (a[1] - c[1]);
+    let inside = |p: [f64; 2], t: [[f64; 2]; 3]| {
+        // The dark seams between cells are the effect: at t=0.99 they are ~0.012% of the width
+        // open, so a 1% pad forgives them and still fails genuinely uncovered ground.
+        let c = [(t[0][0] + t[1][0] + t[2][0]) / 3.0, (t[0][1] + t[1][1] + t[2][1]) / 3.0];
+        let t = t.map(|v| [c[0] + (v[0] - c[0]) * 1.01, c[1] + (v[1] - c[1]) * 1.01]);
+        let (d1, d2, d3) = (sign(p, t[0], t[1]), sign(p, t[1], t[2]), sign(p, t[2], t[0]));
+        !((d1 < 0.0 || d2 < 0.0 || d3 < 0.0) && (d1 > 0.0 || d2 > 0.0 || d3 > 0.0))
+    };
+    for aspect in [16.0 / 9.0, 3.0 / 2.0, 4.0 / 3.0, 11.0 / 8.5, 1.0] {
+        // t = 0.99: every cell is settled and the seams are nearly closed.
+        let ls = transition_frame("honeycomb", "", 0.99, aspect);
+        let tris: Vec<[[f64; 2]; 3]> =
+            ls.iter().filter(|l| l.source == Source::New && l.alpha >= 1.0).map(|l| [l.quad[0], l.quad[1], l.quad[2]]).collect();
+        assert!(!tris.is_empty());
+        let mut sy = 0.0;
+        while sy <= 1.0 {
+            for sx in [0.0, 0.2, 0.4, 0.6, 0.8, 0.99, 1.0] {
+                let p = [sx, sy];
+                assert!(tris.iter().any(|t| inside(p, *t)), "honeycomb aspect {aspect} t=0.99: {sx},{sy} is uncovered (no settled cell reaches it)");
+            }
+            sy += 0.02;
+        }
+    }
+}
+
+/// #147: exits PowerPoint plays downward leave downward here too.
+#[test]
+fn sink_down_and_peek_out_to_bottom_move_down() {
+    for (effect, option) in [("sinkDown", ""), ("peekOut", "b"), ("floatOut", "d")] {
+        let mut a = anim(1, AnimClass::Exit, effect, AnimStart::OnClick);
+        a.option = option.into();
+        let tl = Timeline::new(&slide_with(vec![a]), W, H);
+        let s = tl.state(ShapeId(1), None, 0, 0.5);
+        assert!(s.offset_y > 0.0, "{effect} {option}: {s:?}");
+    }
+}
+
+#[test]
+fn trigger_sequences_keep_first_appearance_order_when_interleaved() {
+    let mut anims = vec![];
+    for (i, tr) in [7u32, 5, 7, 0, 9, 5].iter().enumerate() {
+        let mut a = anim(1 + (i as u32 % 4), AnimClass::Entrance, "fade", AnimStart::OnClick);
+        a.trigger = (*tr != 0).then_some(ShapeId(*tr));
+        anims.push(a);
+    }
+    let tl = Timeline::new(&slide_with(anims), W, H);
+    assert_eq!(tl.trigger_shapes(), vec![ShapeId(7), ShapeId(5), ShapeId(9)]);
+    assert_eq!(tl.trigger_steps(ShapeId(7)), 2);
+    assert_eq!(tl.trigger_steps(ShapeId(5)), 2);
+    assert_eq!(tl.trigger_steps(ShapeId(9)), 1);
+    assert_eq!(tl.steps(), 1);
+}
+
+#[test]
+fn many_distinct_triggers_past_the_effect_cap_build_in_order() {
+    // One sequence per animation: grouping used to rescan every animation per trigger
+    // (~1.2e10 steps here), now it is one pass, and nothing past the cap is looked at.
+    let n = 110_000u32;
+    let anims: Vec<Animation> = (0..n)
+        .map(|i| {
+            let mut a = anim(1, AnimClass::Entrance, "appear", AnimStart::OnClick);
+            a.trigger = Some(ShapeId(1000 + i));
+            a
+        })
+        .collect();
+    let tl = Timeline::new(&slide_with(anims), W, H);
+    assert_eq!(tl.effects().len(), 100_000);
+    let shapes = tl.trigger_shapes();
+    assert_eq!(shapes.len(), 100_000);
+    assert!(shapes.iter().enumerate().all(|(i, s)| *s == ShapeId(1000 + i as u32)));
+}
+
+/// #316: the same text in two shapes that differ otherwise (a title slide's big centred title,
+/// a content slide's title) morphs word by word with the default Objects option, instead of
+/// the old box cross-fading into the new one.
+#[test]
+fn same_text_morphs_even_by_objects() {
+    let p = deckcraft_model::defaults::new_presentation(None);
+    let titled = |id, x, size: f64, text: &str| {
+        let mut body = TextBody::from_text(text);
+        for para in &mut body.paragraphs {
+            for r in &mut para.runs {
+                r.props.size = Some(size);
+            }
+        }
+        Shape { xfrm: Some(Xfrm::new(x, 100.0, 600.0, 120.0)), text: Some(body), ..shape(id, "Title 1") }
+    };
+    let mut a = Slide::default();
+    let mut b = Slide::default();
+    a.shapes = vec![titled(1, 100.0, 60.0, "TEST")];
+    b.shapes = vec![titled(2, 40.0, 44.0, "TEST")];
+    let f = morph_frame(&p, &a, &b, 0.5, &|_| false);
+    assert_eq!(f.text.len(), 1, "the shared text morphs");
+    assert!(!f.text[0].chars);
+    // Different texts still cross-fade with the Objects option.
+    b.shapes = vec![titled(2, 40.0, 44.0, "Other")];
+    assert!(morph_frame(&p, &a, &b, 0.5, &|_| false).text.is_empty());
+}

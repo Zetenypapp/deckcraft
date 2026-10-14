@@ -1,6 +1,17 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101; previous: minor, core-workflow alpha gate added; stage stays alpha; before that: major, first itemized gap list; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (interactive-deck clicks in the slide show; previous: minor (3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101; previous: minor, core-workflow alpha gate added; stage stays alpha; before that: major, first itemized gap list; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues)) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (gap 3 shrinks to media options and rewind: comment threads round-trip now, #70; 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101; previous: minor, core-workflow alpha gate added; stage stays alpha; before that: major, first itemized gap list; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (EMF/WMF rectangle clip regions; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (embedded fonts are read, written and drawn, except MicroType Express subsets; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (WordArt Transform gallery applies a text warp; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus round-trip; notes-master header and footer kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus for comments, links, custom shows, groups and inherited placeholders; paragraph defaults and action sounds kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus for text effects, body layout, theme effects, fills, bevels and connectors; run effect lists and bevel presets kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (owned corpus `corpus_media.rs`: 3-D model parts and animation bounce end round-trip; the real-deck corpus and #70/#74/#77 stay open) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (chart trendlines round-trip; previous: minor, 3-D bevel, camera and face lighting rendered; IME composition and CJK interface text landed, #101; core-workflow alpha gate added; stage stays alpha; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Insert › Icons places a Lucide stroke set; 3-D models and stock content remain; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Size and Position dialog; previous: minor, 3-D bevel, camera and face lighting) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -17,10 +28,12 @@ revision history.
 
 | # | Gap | Category | Beta | Hours | Doc |
 |---|---|---|:-:|---|---|
-| 1 | PPTX never tested against a corpus of real decks | File format | B | 20–35 | [file-format-parity.md](file-format-parity.md) |
+| 1 | PPTX corpus is only decks we author (no PowerPoint reference renders) | File format | B | 20–35 | [file-format-parity.md](file-format-parity.md) |
 | 2 | Data loss and crashes on common paths (#60, #40, #59) | Stability | B | 6–12 | this file |
-| 3 | PPTX round trip drops comment threads, media options, rewind (#70, #74, #77) | File format | B | 3–6 | [file-format-parity.md](file-format-parity.md) |
+| 3 | PPTX round trip drops media options and rewind (#74, #77) | File format | B | 2–4 | [file-format-parity.md](file-format-parity.md) |
 | 4 | SVG pictures don't render (EMF/WMF do) | File format | B | 6–12 | [file-format-parity.md](file-format-parity.md) |
+| 3 | PPTX round trip drops comment threads, media options, rewind (#70, #74, #77) | File format | B | 3–6 | [file-format-parity.md](file-format-parity.md) |
+| 4 | SVG pictures don't render (EMF/WMF do) | File format | B | 4–8 | [file-format-parity.md](file-format-parity.md) |
 | 5 | No localization: English only | Localization | B (infra + 5 languages) | 55–90 | [localization-parity.md](localization-parity.md) |
 | 6 | No printing | Feature | B | 5–8 | [file-format-parity.md](file-format-parity.md) |
 | 7 | Fonts: only Regular, Bold and Italic faces (#69) | Feature | B | 3–5 | [ui-parity.md](ui-parity.md) |
@@ -48,41 +61,86 @@ revision history.
 - **Estimate:** 4–8 h (backend probing outside the process or a safe-mode fallback, a software
   renderer path). Needs a tester with the hardware. **Beta blocker.**
 
-### No soak or long-session testing
-- **Evidence:** unit tests (504), PPTX malformed/fuzz tests and the command panic guard exist; no
-  random command sequences over big decks, no memory or undo-depth soak.
-- **Impact:** unknown crash and slowdown rate in long sessions.
-- **Estimate:** 4–8 h.
+### Soak testing is engine-only
+- **Evidence:** `crates/engine/src/soak_tests.rs` runs seeded random command sequences over a
+  ~100-slide deck (validity, selection, undo/redo exactness, bounded undo, save/reopen in both
+  formats every 100 steps); `DECKCRAFT_SOAK_STEPS` runs it long. It found a chart `clamp` panic
+  that blanked whole slides. Still missing: UI-level (kittest) soak, memory and timing budgets.
+- **Impact:** long-session crash rate is now sampled in CI; slowdowns are not measured.
+- **Estimate:** 2–4 h left.
+### Soak testing is new
+- **Evidence:** `crates/ui-egui/src/ui_soak_tests.rs` drives the whole window with seeded random
+  clicks, drags, keys (plain, Ctrl, Shift), typing and scrolling over the sample deck, checking
+  document validity, bounded undo/journal/thumbnail/texture caches, zero caught command and
+  render panics (`Session::panics_caught`, `deckcraft_render::panics_caught`) and a mean frame
+  under 250 ms; 4 × 3000-action runs are clean. Engine-level command soak: PR #502.
+- **Impact:** long-session crash rate is sampled in CI; RSS is not measured directly.
+- **Estimate:** 1–2 h (RSS sampling per platform).
 
 ## File formats
 
 Detail in [file-format-parity.md](file-format-parity.md).
 
+### PPTX corpus is only decks we author
+- **Evidence:** `crates/pptx/tests/corpus.rs` builds decks in this repo and checks open → save →
+  reopen (package parts and text): a talk with a table, chart, picture, link and comment, and a
+  notes master with a header and footer. Saving used to replace that notes master with an empty
+  one, so "Acme review" and "Do not circulate" disappeared; they are kept now. There is still no
+  larger corpus and no reference render from PowerPoint.
 ### PPTX has never met a corpus of real decks
+- **Evidence:** PPTX tests use decks DeckCraft generates. An owned check
+  (`crates/pptx/tests/corpus_elements.rs`) now opens, saves and reopens comments, hyperlinks and
+  actions, custom shows, grouped rotated objects, and placeholders that inherit position, geometry
+  and text from the layout. That check found paragraph default run properties (`defRPr`, including
+  a link) and action sounds (the sound itself, stop-previous, and a custom show's "Show and
+  return") were dropped on save; they are kept now. Embedded fonts, comment threads (#70), media
+  options (#74) and animation rewind (#77) are still open, and there is no corpus of decks from
+  outside this repo. No reference renders from PowerPoint exist to compare against.
+- **Evidence:** PPTX tests use decks DeckCraft generates. An owned check
+  (`crates/pptx/tests/corpus_style.rs`) now opens, saves and reopens text effects (gradient, outline,
+  shadow, glow, inner shadow, reflection and soft edge), autofit, columns, vertical and RTL text,
+  tab stops, line spacing, theme effects, gradient and pattern fills, 3-D bevels and connectors.
+  That check found a run's inner shadow, reflection and soft edge were dropped, and a bevel preset
+  with no kept `sp3d` was not written back; both are kept now. Comment threads (#70), media options
+  (#74), animation rewind (#77) and embedded fonts are still open, and there is no corpus of decks
+  from outside this repo. No reference renders from PowerPoint exist to compare against.
+- **Evidence:** every PPTX test (`crates/pptx/tests`, 30 tests, plus `corpus_media.rs`) uses decks
+  DeckCraft generates; the 2026-10-07 alpha checklist already listed this as open. No reference
+  renders from PowerPoint exist to compare against. `corpus_media.rs` opens, saves and reopens
+  SmartArt and OLE kept as XML (no diagram or embedding parts; those stay with #203), audio and
+  video bookmarks and trims, a section holding a hidden slide, slide-number and date fields, ink
+  (saved as freeform lines), `.glb` 3-D models, and animation repeat, bounce end and triggers.
+  Playback options (#74) and rewind (#77) are still lost.
 - **Evidence:** every PPTX test (`crates/pptx/tests`, 30 tests) uses decks DeckCraft generates;
+- **Evidence:** every PPTX test (`crates/pptx/tests`) uses decks DeckCraft generates;
   the 2026-10-07 alpha checklist already listed this as open. No reference renders from PowerPoint
-  exist to compare against.
+  exist to compare against. `crates/pptx/tests/corpus_themes.rs` starts on PowerPoint-shaped XML:
+  themes and two masters with their layouts, shadow/glow/soft-edge/reflection effects, and text
+  and shape hyperlinks and actions (text Mouse Over actions were dropped; now kept).
+  exist to compare against. `corpus_charts.rs` round-trips one owned slice (a combo chart with
+  data labels and trendlines, a merged table with diagonal borders, text columns, autofit,
+  vertical text and a WordArt warp). That is still a generated deck, not a corpus of real ones.
 - **Impact:** the main reason to switch is "open my PowerPoint decks". Fidelity on real decks
-  (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is unknown.
-- **Estimate:** 20–35 h: build an owned corpus in `storytold/photocraft-corpus` style (craftrules
-  `standards/test-corpora.md`), add import → render → export → re-import checks, have the owner open
-  outputs in PowerPoint, fix what breaks. **Beta blocker.**
+  (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is still mostly unknown.
+- **Estimate:** 20–35 h: grow the owned corpus in `storytold/photocraft-corpus` style (craftrules
+  `standards/test-corpora.md`), add render checks, have the owner open outputs in PowerPoint, fix
+  what breaks. **Beta blocker.**
 
-### Round trip loses comment threads, media playback options and animation rewind (#70, #74, #77)
-- **Evidence:** issues filed 2026-10-10 by an automated reviewer; the writer emits legacy comments
-  only (no `p188` modern comments with replies and resolved state, though the reader understands
-  them); media playback options and the animation rewind flag aren't written back.
-- **Impact:** a deck opened and saved silently loses review state and show behaviour.
-- **Estimate:** 3–6 h. **Beta blocker.**
+### Round trip loses media playback options and animation rewind (#74, #77)
+- **Evidence:** issues filed 2026-10-10 by an automated reviewer; media playback options and the
+  animation rewind flag aren't written back. Comment threads left with #70: the writer now emits
+  the `p188` modern part next to the legacy one.
+- **Impact:** a deck opened and saved silently loses show behaviour.
+- **Estimate:** 2–4 h. **Beta blocker.**
 
 ### SVG pictures don't render
 - **Evidence:** `crates/render/src/images.rs` decodes through `image` 0.25 (PNG, JPEG, WebP, GIF,
   TIFF, BMP), and EMF/WMF through `deckcraft-metafile` (ported from WordCraft: paths, fills, pens,
-  pattern and hatch brushes, bitmaps and text; clip regions and EMF+ records are not drawn).
+  pattern and hatch brushes, bitmaps and text; rectangle clip regions are applied, EMF+ records are
+  not drawn).
   Nothing reads SVG; PowerPoint's Insert Icons stores SVG with a PNG fallback.
-- **Impact:** SVG icons show only their raster fallback, and SVG files can't be inserted. An
-  EMF/WMF that clips its drawing (EXTSELECTCLIPRGN, INTERSECTCLIPRECT) draws past its clip.
-- **Estimate:** 4–8 h (an SVG renderer through `resvg`-style crates); EMF/WMF clip regions 2–4 h.
+- **Impact:** SVG icons show only their raster fallback, and SVG files can't be inserted.
+- **Estimate:** 4–8 h (an SVG renderer through `resvg`-style crates).
 
 ### Template, slide-show and macro variants are saved as plain `.pptx`
 - **Evidence:** `crates/pptx/src/write/mod.rs` always writes the
@@ -121,9 +179,9 @@ Detail in [file-format-parity.md](file-format-parity.md).
 - **Estimate:** 10–16 h (render the timeline frame by frame; an H.264 encoder is the hard part,
   FilmCraft has one to copy).
 
-### Embedded fonts aren't read or written
-- **Evidence:** no `p:embeddedFontLst` handling in `crates/pptx`.
-- **Impact:** decks that rely on embedded fonts reflow.
+### Embedded MicroType Express font subsets aren't drawn
+- **Evidence:** `p:embeddedFontLst` is read and written. A raw TrueType/OpenType face, or one inside an Embedded OpenType wrapper, is loaded and used to draw. A MicroType Express subset (`application/x-fontdata` with neither form) is kept and written back, and the text still uses a stand-in.
+- **Impact:** decks that embed a MicroType subset reflow until that face is installed.
 - **Estimate:** 3–5 h.
 
 ## Features
@@ -146,7 +204,9 @@ Detail in [file-format-parity.md](file-format-parity.md).
 ### Charts: data grid, elements and the newer chart types
 - **Evidence:** checklist rows "Edit chart data" (P0, partial), "Chart elements" (partial), "Other
   chart types" (partial); `chartex` parts (waterfall, funnel, treemap, sunburst, histogram, box &
-  whisker) aren't read.
+  whisker) aren't read. Trendlines round-trip (`corpus_charts.rs`) and are not drawn. A combo
+  chart's secondary value axis is read (`y2_*`, `Series.secondary_axis`) and is not written back
+  when the chart is rebuilt.
 - **Impact:** most business decks have charts; editing their data is routine.
 - **Estimate:** 12–20 h. Data and elements are **beta blockers** (6–10 h).
 
@@ -159,6 +219,20 @@ Detail in [file-format-parity.md](file-format-parity.md).
 ### Animation Pane, effect count and preview
 Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a **beta blocker**.
 
+### Interactive decks: media-action links, audio-triggered effects and click boxes
+- **Evidence:** the slide show plays click-triggered animations, keeps each slide's state across
+  visits and ignores shapes an animation has hidden (`crates/anim/src/interact.rs`). Still open,
+  found by running three classroom game decks (Jeopardy-style boards, hide-and-reveal, score
+  counters): a click on a shape whose action is "play sound" (`ppaction://media`, 126 and 486
+  shapes in two decks) does nothing; triggers that start on `onStopAudio` or `begin` conditions are
+  not read as triggers; click boxes are the shape's bounding box (a hexagon's corners count) and do
+  not follow a shape that a motion path has moved; the PPTX writer turns every "on click" after the
+  first effect of a trigger into "after previous", so a trigger with several click steps saved from
+  DeckCraft plays all of them at once.
+- **Impact:** games built around sound effects on buttons, or around a button that counts up with
+  repeated clicks, lose that part when they are saved from DeckCraft or played in it.
+- **Estimate:** 4–8 h.
+
 ### Notes and Handout masters
 - **Evidence:** checklist row missing; PPTX writes a notes master but there's no view to edit it,
   and no handout master at all.
@@ -166,13 +240,27 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
 
 ### Edit points, text warp, 3-D
 - **Evidence:** checklist rows "Edit points" (P1 missing), "Text warp transforms" (partial: all 40
+  `prstTxWarp` presets render, their adjusts round-trip, and Shape Format ▸ Text Effects ▸
+  Transform applies one with `format.textWarp`; still open are adjust handles, and arc/circle
+  placement can differ from PowerPoint by 1–3 % of the path length), "Bevel and 3-D rotation"
+  (partial: bevels, camera presets and rotations and face lighting render as approximations and
+  `scene3d`/`sp3d` round-trip as raw XML; no extrusion or side faces, only the three-point rig, and
+  no command or pane to apply 3-D).
+- **Estimate:** 4–6 h (edit points), 1–2 h (warp adjust handles), 6–10 h (3-D extrusion,
+- **Evidence:** checklist rows "Edit points" (P1 partial: Edit Points converts a shape to a freeform, vertices drag, Ctrl/Cmd-click adds or deletes; no point types or Bézier control handles), "Text warp transforms" (partial: all 40
+- **Evidence:** checklist rows "Edit points" (P1 partial: Edit Points converts a shape to a freeform, vertices drag, Ctrl/Cmd-click adds or deletes, smooth/straight/corner points and Bézier handles; no Straight/Curved Segment or Open/Close Path), "Text warp transforms" (partial: all 40
   `prstTxWarp` presets render and their adjusts round-trip, but there is no Transform gallery or
   command to apply one, no adjust handles, and arc/circle placement can differ from PowerPoint by
   1–3 % of the path length), "Bevel and 3-D rotation" (partial: bevels, camera presets and rotations and face lighting
   render as approximations and `scene3d`/`sp3d` round-trip as raw XML; no extrusion or side faces,
   only the three-point rig, and no command or pane to apply 3-D).
-- **Estimate:** 4–6 h (edit points), 2–4 h (warp gallery, command and handles), 6–10 h (3-D extrusion,
-  rigs and materials, Format Shape page).
+- **Estimate:** 1 h (edit points: segment types, open/close path), 2–4 h (warp gallery, command and handles), 6–10 h (3-D extrusion,
+  render as approximations and `scene3d`/`sp3d` round-trip as raw XML; extrusions draw their
+  sides under turned cameras, each lit for its own normal; the preset light rigs, rig directions and
+  materials shade bevels and sides approximately (fitted to PowerPoint for three-point/matte only); contours draw as a
+  band round the face outline (not round the extruded silhouette); no command or pane to apply 3-D).
+- **Estimate:** 4–6 h (edit points), 2–4 h (warp gallery, command and handles), 1–2 h (fitting the other rigs and materials
+  to PowerPoint renders), plus the Format Shape page.
 
 ### Proofing: spelling, thesaurus, AutoCorrect
 - **Evidence:** `review.spelling` checks a small built-in list of frequent misspellings
@@ -185,10 +273,9 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
 
 ### Smaller missing rows
 Zoom (summary/section/slide, 6–10 h), reuse slides (2–4 h), laser pointer (1–2 h), transition
-sounds (1–2 h), artistic effects (6–10 h), remove background (6–10 h; needs a model or a classical
-matte), compress pictures (2–3 h), insert screenshot (2–3 h), record audio/screen and record slide
+sounds (1–2 h), artistic effects (6–10 h), compress pictures (2–3 h), insert screenshot (2–3 h), record audio/screen and record slide
 show (8–12 h), compare presentations (6–10 h), password protection (4–6 h, ECMA-376 agile
-encryption), ink to shape/text (6–10 h), icons and 3-D models (8–14 h, needs an open icon set).
+encryption), ink to shape/text (6–10 h), 3-D models and stock content (6–10 h; Insert › Icons places a Lucide stroke set).
 
 ## UI/UX
 
@@ -203,8 +290,10 @@ Detail in [ui-parity.md](ui-parity.md).
 - **Window chrome** (#71 macOS controls misaligned, #26 GNOME title bar, #41 system light/dark).
   2–4 h.
 - **Icon consistency across Craft apps** (#73, #56). 2–4 h; coordinate in craftrules.
-- **Dialogs**: 27 dialogs vs PowerPoint's ~60 (Font, Bullets and Numbering, Find/Replace dialog,
+- **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Font, Find/Replace dialog,
   Replace Fonts, Action Settings, Print, Insert Object…). 8–14 h.
+- **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Font, Bullets and Numbering, Find/Replace dialog,
+  Replace Fonts, Action Settings, Print, Insert Object…). Size and Position is one of the 28. 8–14 h.
 - **Command palette defaults to an Export entry that fails** (#79). 0.5 h.
 
 ## Hardware
@@ -236,8 +325,10 @@ Detail in [localization-parity.md](localization-parity.md).
 
 ## Performance
 
-- **No baseline.** Nothing measures open time, render time per slide, show frame rate or memory
-  against PowerPoint. 4–8 h for a benchmark suite in `xtask`.
+- **Baseline measured, not compared.** `cargo xtask bench` (and `deckcraft-cli bench FILE`) times
+  open, per-slide render, save, PPTX round trip and PDF export, and peak memory, against a saved
+  baseline; show frame rate isn't measured and there are no PowerPoint numbers to set beside it.
+  2–4 h.
 - **Morph aligns outlines every frame** (#67, PR open). 1 h.
 
 ## Ecosystem
@@ -256,7 +347,25 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | EMF/WMF rectangle clip regions (`INTERSECTCLIPRECT`, `EXCLUDECLIPRECT`, `EXTSELECTCLIPRGN`) limit later drawing. EMF+ records remain |
+| 2026-10-13 | minor | Embedded fonts are read, written and drawn (TrueType, OpenType, Embedded OpenType). The gap is now MicroType Express subsets, which are kept but not drawn |
+| 2026-10-13 | minor | WordArt Transform gallery: Shape Format ▸ Text Effects lists the 40 presets and No Transform; `format.textWarp` applies one (adjust handles still open) |
+| 2026-10-13 | minor | Edit Points: smooth/straight/corner point types, Bézier handle dragging, right-click point menu, no selection box while editing |
+| 2026-10-13 | minor | Edit Points: convert to freeform, drag, add and delete vertices (`shape.editPoints`, `shape.movePoint`, `shape.addPoint`, `shape.deletePoint`); left: point types and control handles |
+| 2026-10-13 | minor | Owned PPTX corpus round-trip (parts and text). Notes-master header and footer text is kept; the corpus gap is now a larger set and PowerPoint reference renders |
+| 2026-10-13 | minor | Owned PPTX corpus for comments, links and actions, custom shows, rotated groups and inherited placeholders. Paragraph `defRPr` and action sounds kept. Embedded fonts and #70/#74/#77 stay open |
+| 2026-10-13 | minor | Owned PPTX corpus for text effects, body layout, theme effects, fills, bevels and connectors. A run's inner shadow, reflection and soft edge, and a bevel preset with no kept 3-D XML, are kept. #70, #74, #77 and embedded fonts stay open |
+| 2026-10-13 | minor | Benchmark suite (`cargo xtask bench`, `deckcraft-cli bench`): the performance gap is now frame rate and a PowerPoint comparison |
+| 2026-10-14 | minor | Owned corpus `corpus_media.rs`: 3-D model parts and animation bounce end now round-trip. The real-deck corpus and #70/#74/#77 stay open |
+| 2026-10-14 | trivial | Corpus slice: themes, masters, effects and links; text Mouse Over actions round-trip |
+| 2026-10-14 | minor | Chart trendlines round-trip. The real-deck corpus gap stays open; secondary-axis export and drawing trendlines stay in the charts gap |
+| 2026-10-14 | trivial | 3-D contours |
+| 2026-10-14 | trivial | 3-D light rigs and materials; extrusion sides lit per side |
+| 2026-10-14 | trivial | 3-D extrusions draw their sides under turned cameras |
+| 2026-10-14 | minor | Insert › Icons places Lucide 1.56.0 stroke icons as custom shapes. The checklist row stays missing until 3-D models and stock content exist |
+| 2026-10-14 | minor | Size and Position dialog landed (position, size, rotation, scale, lock aspect, one undo). The dialog gap remains Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object and the rest of the ~60 |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
+| 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
 | 2026-10-12 | minor | EMF/WMF text, pattern and hatch brushes drawn; legacy OLE and ActiveX previews shown; the SVG gap keeps only EMF clip regions |
 | 2026-10-12 | minor | Text warps render (all 40 presets, adjusts round-trip); the warp gap is now the gallery, command and handles |

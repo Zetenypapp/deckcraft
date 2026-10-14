@@ -1,6 +1,7 @@
 # Transitions and animations: parity with PowerPoint
 
-> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** major (transitions measured frame by frame against PowerPoint for Windows' video export and retuned; previous: created) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (interactive-deck clicks in the slide show; previous: major (transitions measured frame by frame against PowerPoint for Windows' video export and retuned; previous: created)) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (animation bounce end and repeat round-trip; rewind still #77) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Transitions and animations are what make a deck a presentation, and the part of PowerPoint people
 notice first when it's missing. Scores roll up into [target-app-parity.md](target-app-parity.md)
@@ -39,7 +40,7 @@ perspective-correct subdivided meshes.
 |---|---|---|
 | Effect Options per transition | yes | yes |
 | Duration, advance on click / after time, Apply To All | yes | yes |
-| Transition sounds | yes | **no** (the model has the field; no picker, no playback) |
+| Transition sounds | yes | yes: Transitions › Sound offers six built-in sounds (synthesised, no sound files shipped), Other Sound…, [Stop Previous Sound] and Loop Until Next Sound; they play in the show and round-trip |
 | Preview in the editor | yes | yes |
 | Morph: objects move, resize, recolour | yes | yes |
 | Morph: Words and Characters | yes | yes (#5) |
@@ -54,7 +55,7 @@ perspective-correct subdivided meshes.
 | Entrance | ~50 | 24 | Plus, Wedge, Basic Zoom, Center Revolve, Compress, Stretch, Boomerang, Credits, Curve Up, Drop, Flip, Float, Pinwheel, Spiral In, Whip, Ascend, Descend, Unfold |
 | Emphasis | ~25 | 17 | Brush Color, Bold Reveal, Contrasting Color, Flicker, Grow With Color, Shimmer, Blink |
 | Exit | ~50 | 14 | Mirrors of the missing entrance effects, plus Blinds, Box, Checkerboard, Circle, Diamond, Peek Out, Strips as exits |
-| Motion paths | 64 presets + custom | 6 (Lines, Arcs, Turns, Loops, Shapes-style presets, Custom Path) | Most of Basic (shapes), Lines & Curves and Special presets |
+| Motion paths | 64 presets + custom | 40 + Custom Path (Lines, Arcs, Turns, Loops, Basic shapes such as stars, heart, moon, teardrop; Lines & Curves such as zigzag, waves, S curves, spirals, bounces; Special such as figure 8, bean, peanut, neutron) | Remaining ~24 presets (some Basic shapes, Lines & Curves variants) |
 | Media (Play, Pause, Stop) | 3 (+ Seek) | 3 | Seek, bookmarks as triggers |
 
 By how often people use them, the effects present cover nearly all real decks (Appear, Fade, Fly
@@ -65,9 +66,9 @@ In, Wipe, Zoom, Float In, Grow/Shrink, Pulse, Spin, motion lines): weighted, ~85
 |---|---|---|
 | Start On Click / With Previous / After Previous, duration, delay | yes | yes |
 | Effect Options (direction, sequence by paragraph) | yes | yes |
-| Effect dialog: sound, after-animation dim/hide, animate text by word/letter, smooth start/end, bounce end, repeat, rewind | yes | partly; rewind lost on PPTX save (#77) |
+| Effect dialog: sound, after-animation dim/hide, animate text by word/letter, smooth start/end, bounce end, repeat, rewind | yes | partly; repeat and bounce end round-trip; rewind lost on PPTX save (#77) |
 | By-paragraph text builds, sub-bullets follow parents | yes | yes |
-| Triggers (on click of a shape) | yes | yes |
+| Triggers (on click of a shape) | yes | yes; played in the show: a step per click, the sequence starts over after its last step, a click completes a playing step |
 | Triggers on a media bookmark | yes | no |
 | Animation Painter | yes | yes (#54) |
 | Animation Pane: list, reorder, remove | yes | yes |
@@ -84,6 +85,8 @@ In, Wipe, Zoom, Float In, Grow/Shrink, Pulse, Spin, motion lines): weighted, ~85
 | Animation Pane timeline, preview from selected, effect dialog depth | 5–8 |
 | The remaining ~126 effects (most are parameter variations of existing ones) | 3–6 |
 | Rewind and other effect options on round trip (#77) | 1–2 |
+| Transition sounds: the rest of PowerPoint's built-in list (Applause, Arrow, Bomb…) | 1 |
+| Rewind on round trip (#77) | 1–2 |
 | Transition sounds | 1–2 |
 | Morph across pictures, `!!` names, align once per transition (#67) | 2–4 |
 | Cloth, paper and particle transitions as real meshes (Curtains, Peel Off, Page Curl, Airplane, Origami, Vortex, Shred, Honeycomb) | 4–8 |
@@ -93,5 +96,7 @@ In, Wipe, Zoom, Float In, Grow/Shrink, Pulse, Spin, motion lines): weighted, ~85
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | trivial | Repeat and bounce end round-trip through PPTX; rewind is still lost (#77) |
 | 2026-10-13 | major | Transitions measured frame by frame against PowerPoint's video export and retuned (mean diff 35.7 → 15.0); PowerPoint's XML defaults and option meanings; new options |
+| 2026-10-13 | minor | Triggers now play in the slide show (they were read and written but never started), effects of different triggers apply in the order they were clicked |
 | 2026-10-10 | major | Created: 48/48 transitions, 64 of ~190 animation effects, pane and option depth, estimates |

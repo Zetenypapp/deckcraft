@@ -259,6 +259,9 @@ pub struct Backstage {
     pub print_layout: &'static str,
     pub print_hidden: bool,
     pub print_frame: bool,
+    /// Notes and handouts: a paper id from [`deckcraft_engine::cmd::file::PAPERS`] and its orientation.
+    pub print_paper: &'static str,
+    pub print_landscape: bool,
     pub preview_page: usize,
     pub export: ExportTask,
     /// Export › Change File Type / Save As: the chosen type (an [`SAVE_TYPES`] id).
@@ -297,6 +300,8 @@ impl Backstage {
             print_layout: "slides",
             print_hidden: false,
             print_frame: true,
+            print_paper: "letter",
+            print_landscape: false,
             preview_page: 0,
             export: ExportTask::Pdf,
             file_type: "pptx",
@@ -487,6 +492,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
             }
             if nav_item(ui, *nav, &bs, index, &t).clicked() {
                 bs.focus = None;
+                commit_props(app, &bs);
                 match act(app, *nav, bs.page) {
                     None => out.close = true,
                     Some(p) => out.page = Some(p),
@@ -501,6 +507,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
             for (k, nav) in bottom.iter().enumerate().rev() {
                 if nav_item(ui, *nav, &bs, first_bottom + k, &t).clicked() {
                     bs.focus = None;
+                    commit_props(app, &bs);
                     match act(app, *nav, bs.page) {
                         None => out.close = true,
                         Some(p) => out.page = Some(p),
@@ -706,7 +713,7 @@ fn recent_list(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize) {
         if resp.on_hover_text(&path).clicked()
             && let Err(e) = app.open_path(&path)
         {
-            app.set_status(e);
+            app.notify(e);
         }
     }
 }
@@ -931,15 +938,16 @@ fn info(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
                     let Some(draft) = bs.props.get_mut(i) else { continue };
                     let l = ui.label(RichText::new(*label).color(t.text_dim));
                     let id = ui.make_persistent_id(("backstage_prop", *key));
-                    // Show the presentation's value unless the field is being edited (undo…).
-                    if !ui.ctx().memory(|m| m.has_focus(id)) {
-                        draft.clone_from(&saved);
-                    }
                     let resp = ui.add(egui::TextEdit::singleline(draft).id(id).hint_text(*hint).desired_width(300.0)).labelled_by(l.id);
                     if resp.lost_focus() && *draft != saved {
+                        // Commit first: a click on another field takes the focus before this one is drawn.
                         let mut p = serde_json::Map::new();
                         p.insert((*key).to_string(), json!(draft.clone()));
                         let _ = app.run("file.properties", Value::Object(p));
+                    } else if !resp.has_focus() && *draft != saved {
+                        // Show the presentation's value unless the field is being edited (undo...).
+                        draft.clone_from(&saved);
+                        ui.ctx().request_repaint();
                     }
                     ui.end_row();
                 }
@@ -947,6 +955,24 @@ fn info(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
             });
         });
     });
+}
+
+/// Commits what the Info page's property fields hold and the presentation does not: a side-menu
+/// action such as Save runs before the field that is being left is drawn again (#422).
+fn commit_props(app: &mut SlideApp, bs: &Backstage) {
+    if bs.page != Page::Info {
+        return;
+    }
+    let Ok(v) = app.session.execute("file.info", &json!({})) else { return };
+    let mut p = serde_json::Map::new();
+    for ((key, _, _), draft) in PROPERTIES.iter().zip(&bs.props) {
+        if v["properties"].get(*key).and_then(Value::as_str).unwrap_or("") != *draft {
+            p.insert((*key).to_string(), json!(draft));
+        }
+    }
+    if !p.is_empty() {
+        let _ = app.run("file.properties", Value::Object(p));
+    }
 }
 
 /// `1234567` → `1.2 MB`.
@@ -1025,7 +1051,24 @@ pub fn print_params(bs: &Backstage, slides: &[usize]) -> Value {
         _ => ("slides", 0),
     };
     // The list is already filtered for hidden slides, so the PDF takes it as it is.
-    json!({"layout": layout, "perPage": per, "slides": slides, "includeHidden": true, "frame": bs.print_frame})
+    json!({
+        "layout": layout,
+        "perPage": per,
+        "slides": slides,
+        "includeHidden": true,
+        "frame": bs.print_frame,
+        "paper": bs.print_paper,
+        "orientation": if bs.print_landscape { "landscape" } else { "portrait" },
+    })
+}
+
+/// The printed page size in points: the slide size for full-page slides, else the chosen paper.
+pub fn print_page_size(bs: &Backstage, doc: &deckcraft_model::Presentation) -> (f32, f32) {
+    if bs.print_layout == "slides" {
+        return (doc.slide_size.width as f32, doc.slide_size.height as f32);
+    }
+    let (w, h) = deckcraft_engine::cmd::file::paper_size(bs.print_paper, bs.print_landscape).unwrap_or((612.0, 792.0));
+    (w as f32, h as f32)
 }
 
 const LAYOUTS: [(&str, &str); 8] = [
@@ -1103,6 +1146,28 @@ fn print(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
                 }
             });
             ui.add_space(4.0);
+            // PowerPoint prints full-page slides on slide-shaped pages; paper and orientation are
+            // for notes pages and handouts.
+            ui.add_enabled_ui(bs.print_layout != "slides", |ui| {
+                let paper = deckcraft_engine::cmd::file::PAPERS.iter().find(|p| p.0 == bs.print_paper).map_or("Letter", |p| p.1);
+                egui::ComboBox::from_id_salt("backstage_print_paper").width(240.0).selected_text(paper).show_ui(ui, |ui| {
+                    for (id, label, _) in deckcraft_engine::cmd::file::PAPERS {
+                        if ui.selectable_label(bs.print_paper == id, label).clicked() {
+                            bs.print_paper = id;
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+                let orient = if bs.print_landscape { "Landscape Orientation" } else { "Portrait Orientation" };
+                egui::ComboBox::from_id_salt("backstage_print_orientation").width(240.0).selected_text(orient).show_ui(ui, |ui| {
+                    for (land, label) in [(false, "Portrait Orientation"), (true, "Landscape Orientation")] {
+                        if ui.selectable_label(bs.print_landscape == land, label).clicked() {
+                            bs.print_landscape = land;
+                        }
+                    }
+                });
+            });
+            ui.add_space(4.0);
             if ui.checkbox(&mut bs.print_hidden, "Print Hidden Slides").changed() {
                 bs.preview_page = 0;
             }
@@ -1135,8 +1200,8 @@ fn preview(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, doc: &deckcraft_
     let last = pages.len().saturating_sub(1);
     bs.preview_page = bs.preview_page.min(last);
     let Some(on_page) = pages.get(bs.preview_page).copied() else { return };
-    // Full-page slides print on slide-shaped pages; notes and handouts on portrait Letter.
-    let (pw, ph) = if bs.print_layout == "slides" { (doc.slide_size.width as f32, doc.slide_size.height as f32) } else { (612.0, 792.0) };
+    // Full-page slides print on slide-shaped pages; notes and handouts on the chosen paper.
+    let (pw, ph) = print_page_size(bs, doc);
     let avail_w = ui.available_width().clamp(200.0, 760.0);
     let scale = (avail_w / pw.max(1.0)).min(520.0 / ph.max(1.0));
     let (area, _) = ui.allocate_exact_size(vec2(avail_w, ph * scale + 24.0), Sense::hover());

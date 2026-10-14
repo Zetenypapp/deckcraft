@@ -431,7 +431,7 @@ pub fn ppr(imp: &mut Imp, part: &Part, p: &El) -> (Option<u8>, ParaProps, Option
     (lvl, pp, def)
 }
 
-pub fn hyperlink(imp: &Imp, part: &Part, h: &El) -> Option<Hyperlink> {
+pub fn hyperlink(imp: &mut Imp, part: &Part, h: &El) -> Option<Hyperlink> {
     let rid = h.attr("r:id").unwrap_or("");
     let rel = part.rels.get(rid);
     let action = h.attr("action").unwrap_or("");
@@ -450,7 +450,8 @@ pub fn hyperlink(imp: &Imp, part: &Part, h: &El) -> Option<Hyperlink> {
         Action::Slide { slide }
     } else if let Some(q) = action.strip_prefix("ppaction://customshow?") {
         let id = q.split('&').find_map(|kv| kv.strip_prefix("id=")).unwrap_or("0");
-        Action::CustomShow { name: imp.custom_show_names.get(id).cloned().unwrap_or_else(|| id.to_string()) }
+        let returns = !matches!(q.split('&').find_map(|kv| kv.strip_prefix("return=")), Some("false" | "0"));
+        Action::CustomShow { name: imp.custom_show_names.get(id).cloned().unwrap_or_else(|| id.to_string()), returns }
     } else if action.starts_with("ppaction://program") {
         Action::Program { path: rel.map(|r| r.target.clone()).unwrap_or_default() }
     } else if action.starts_with("ppaction://media") {
@@ -470,7 +471,13 @@ pub fn hyperlink(imp: &Imp, part: &Part, h: &El) -> Option<Hyperlink> {
     } else {
         return None;
     };
-    Some(Hyperlink { action: a, tooltip: h.attr("tooltip").unwrap_or("").to_string(), highlight_click: h.bool("highlightClick").unwrap_or(false) })
+    Some(Hyperlink {
+        action: a,
+        tooltip: h.attr("tooltip").unwrap_or("").to_string(),
+        highlight_click: h.bool("highlightClick").unwrap_or(false),
+        stop_sound: h.bool("endSnd").unwrap_or(false),
+        sound: h.child("snd").and_then(|s| media_ref(imp, part, s)),
+    })
 }
 
 pub fn rpr(imp: &mut Imp, part: &Part, r: &El) -> RunProps {
@@ -503,7 +510,10 @@ pub fn rpr(imp: &mut Imp, part: &Part, r: &El) -> RunProps {
             "effectLst" => {
                 let fx = effects(e);
                 p.shadow = fx.outer_shadow;
+                p.inner_shadow = fx.inner_shadow;
                 p.glow = fx.glow;
+                p.reflection = fx.reflection;
+                p.soft_edge = fx.soft_edge;
             }
             "highlight" => p.highlight = color(e),
             "uFill" => p.underline_color = e.child("solidFill").and_then(color),
@@ -512,6 +522,7 @@ pub fn rpr(imp: &mut Imp, part: &Part, r: &El) -> RunProps {
             "cs" => p.font_cs = e.attr("typeface").filter(|t| !t.is_empty()).map(String::from),
             "sym" => p.font_sym = e.attr("typeface").filter(|t| !t.is_empty()).map(String::from),
             "hlinkClick" => p.link = hyperlink(imp, part, e),
+            "hlinkMouseOver" => p.hover = hyperlink(imp, part, e),
             _ => {}
         }
     }
@@ -545,15 +556,18 @@ pub fn paragraph(imp: &mut Imp, part: &Part, p: &El) -> Paragraph {
     for e in p.elements() {
         match e.local() {
             "pPr" => {
-                let (lvl, pp, _) = ppr(imp, part, e);
+                let (lvl, pp, def) = ppr(imp, part, e);
                 para.level = lvl.unwrap_or(0);
                 para.props = pp;
+                if let Some(d) = def {
+                    para.def_props = d;
+                }
             }
             "r" => {
                 let props = e.child("rPr").map(|r| rpr(imp, part, r)).unwrap_or_default();
                 let text: String = e.child("t").map(|t| t.text()).unwrap_or_default();
-                // Vertical tab inside text is a soft break in some writers.
-                for (i, piece) in text.split('\u{b}').enumerate() {
+                // A vertical tab or line feed inside text is a line break, as it lays out and as export writes it.
+                for (i, piece) in text.split(['\u{b}', '\n']).enumerate() {
                     if i > 0 {
                         para.runs.push(Run { text: String::new(), props: props.clone(), kind: RunKind::Break });
                     }
@@ -579,7 +593,7 @@ pub fn paragraph(imp: &mut Imp, part: &Part, p: &El) -> Paragraph {
                 for t in ts {
                     text.push_str(&t.text());
                 }
-                let omml = e.elements().map(|c| c.to_xml()).collect::<String>();
+                let omml = e.elements().map(|c| part.keep_inner(c)).collect::<String>();
                 para.runs.push(Run { text, props: RunProps::default(), kind: RunKind::Math { omml } });
             }
             "endParaRPr" => para.end_props = rpr(imp, part, e),

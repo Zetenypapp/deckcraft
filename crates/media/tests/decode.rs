@@ -313,6 +313,23 @@ fn video_feed_follows_the_clock() {
 }
 
 #[test]
+fn video_feed_repeated_seeks_keep_the_requested_frame() {
+    let timeout = Duration::from_secs(5);
+    for name in ["clip-h264.mov", "clip-hevc.mp4", "clip-vp9.webm", "clip-av1.mkv"] {
+        let mut feed = deckcraft_media::VideoFeed::new(fixture(name)).expect("feed");
+        for _ in 0..20 {
+            // A decoder can finish this small clip before the consumer next polls it.
+            // Rewinding must keep the new generation's first frame, even at end of stream.
+            feed.seek(0.05);
+            let frame = feed.frame_at_blocking(0.05, timeout).expect("frame after rewind");
+            assert_eq!(frame.time, 0.0, "{name}");
+            let frame = feed.frame_at_blocking(0.45, timeout).expect("frame after advancing");
+            assert!((frame.time - 0.4).abs() < 0.02, "{name}: {}", frame.time);
+        }
+    }
+}
+
+#[test]
 fn player_plays_decoded_audio_through_the_mixer() {
     use deckcraft_media::{ClipParams, Player, VoiceSpec};
     let b: Bytes = Arc::new(wav(48_000, 1, &sine(48_000, 0.5)));
@@ -324,4 +341,34 @@ fn player_plays_decoded_audio_through_the_mixer() {
     let rms = (buf.iter().map(|s| s * s).sum::<f32>() / buf.len() as f32).sqrt();
     assert!((rms - 0.0884 * 0.5).abs() < 0.005, "{rms}");
     assert!((p.status(1).map(|s| s.position).unwrap_or(0.0) - 0.1).abs() < 1e-6);
+}
+
+/// Damaged files found by mutation fuzzing the fixtures above (so CC0 like them): each must come
+/// back as an error or as audio — not panic (symphonia's Matroska reader panics on the first two)
+/// and not hang (the MP4 demuxer reported the same error forever on the last two).
+#[test]
+fn damaged_media_neither_panics_nor_hangs() {
+    for name in ["damaged/ebml-header.mkv", "damaged/ebml-position.webm", "damaged/demux-loop.mp4", "damaged/demux-loop.m4a"] {
+        let b = fixture(name);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let ok = std::panic::catch_unwind(|| {
+                let _ = probe::probe(&b);
+                let _ = audio::decode(&b);
+                if let Ok(mut d) = video::VideoDecoder::open(b.clone()) {
+                    for _ in 0..12 {
+                        if !matches!(d.next_frame(), Ok(Some(_))) {
+                            break;
+                        }
+                    }
+                }
+            })
+            .is_ok();
+            let _ = tx.send(ok);
+        });
+        match rx.recv_timeout(Duration::from_secs(20)) {
+            Ok(ok) => assert!(ok, "{name} panicked"),
+            Err(_) => panic!("{name} still decoding after 20 s"),
+        }
+    }
 }

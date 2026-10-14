@@ -3,12 +3,12 @@
 > **Generated:** 2026-10-10 (summary by `cargo xtask parity`; rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
-**Weighted breadth parity: 79%** over 191 features.
+**Weighted breadth parity: 80%** over 191 features.
 
 | Priority | Features | Done | Partial | Missing | Parity |
 |---|---|---|---|---|---|
 | P0 | 72 | 61 | 11 | 0 | 92% |
-| P1 | 65 | 38 | 21 | 6 | 75% |
+| P1 | 65 | 39 | 20 | 6 | 75% |
 | P2 | 54 | 13 | 15 | 26 | 38% |
 
 | Area | Parity |
@@ -32,7 +32,7 @@ The summary between `<!-- SUMMARY -->
 | Slide show | 66% |
 | Review | 60% |
 | Draw | 33% |
-| Undo & clipboard | 88% |
+| Undo & clipboard | 100% |
 | Automation (✱) | 100% |
 | Platforms (✱) | 67% |
 
@@ -110,7 +110,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Shapes | Connectors (straight, elbow, curved) | P0 | D |
 | Shapes | Connector glue to connection sites | P1 | D |
 | Shapes | Freeform, curve and scribble tools | P1 | D |
-| Shapes | Edit points | P1 | M |
+| Shapes | Edit points | P1 | P |
 | Shapes | Merge shapes (union, combine, fragment, intersect, subtract) | P1 | D |
 | Shapes | Change shape | P1 | D |
 | Shapes | Text boxes | P0 | D |
@@ -199,7 +199,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Transitions | Transition gallery (fade, push, wipe, split, cover, uncover, zoom, morph…) | P0 | D |
 | Transitions | Effect options and duration | P0 | D |
 | Transitions | Advance on click / after time, apply to all | P0 | D |
-| Transitions | Transition sounds | P2 | M |
+| Transitions | Transition sounds | P2 | D |
 | Transitions | Morph | P1 | D |
 | Animations | Entrance, emphasis, exit effects | P0 | D |
 | Animations | Motion paths | P1 | P |
@@ -227,7 +227,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Draw | Ink to shape / text | P2 | M |
 | Undo & clipboard | Unlimited undo/redo | P0 | D |
 | Undo & clipboard | Cut, copy, paste shapes and slides | P0 | D |
-| Undo & clipboard | Paste special (keep formatting, picture, text only) | P1 | P |
+| Undo & clipboard | Paste special (keep formatting, picture, text only) | P1 | D |
 | Automation (✱) | Every command scriptable (CLI, control channel, MCP) | P0 | D |
 | Automation (✱) | Headless rendering and conversion | P0 | D |
 | Platforms (✱) | macOS, Windows, Linux builds | P0 | P |

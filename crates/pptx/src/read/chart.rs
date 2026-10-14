@@ -1,6 +1,6 @@
 //! Chart parts (`c:chartSpace`) → [`Chart`]. The original XML is kept in `Chart.raw`.
 
-use deckcraft_model::chart::{Chart, ChartType, Series};
+use deckcraft_model::chart::{Chart, ChartType, Series, Trendline, TrendlineType};
 use deckcraft_model::style::Fill;
 
 use crate::xml::El;
@@ -35,19 +35,34 @@ fn rich_text(t: &El) -> Option<String> {
     tx.find("v").map(|v| v.text())
 }
 
-/// String values from `c:cat`/`c:tx` (str or num refs, caches or literals).
-fn strings(e: &El) -> Vec<String> {
+/// Most category/value/size slots one chart may decode across all its series and caches, so
+/// sparse `ptCount`/`idx` declarations can't expand far beyond the XML they came from.
+pub(crate) const MAX_CHART_POINTS: usize = 1_000_000;
+
+/// Most slots one cache may hold.
+const MAX_CACHE_POINTS: usize = 100_000;
+
+/// String values from `c:cat`/`c:tx` (str or num refs, caches or literals). Every slot returned
+/// is taken from `budget`; once it runs out the values are cut short.
+fn strings(e: &El, budget: &mut usize) -> Vec<String> {
+    let cap = MAX_CACHE_POINTS.min(*budget);
+    let out = strings_capped(e, cap);
+    *budget = budget.saturating_sub(out.len());
+    out
+}
+
+fn strings_capped(e: &El, cap: usize) -> Vec<String> {
     let cache = e.find("strCache").or_else(|| e.find("numCache")).or_else(|| e.find("strLit")).or_else(|| e.find("numLit"));
     if let Some(c) = cache {
-        let n = c.child("ptCount").and_then(|p| p.u32("val")).unwrap_or(0).min(100_000) as usize;
+        let n = (c.child("ptCount").and_then(|p| p.u32("val")).unwrap_or(0) as usize).min(cap);
         let mut out = vec![String::new(); n];
-        for pt in c.children_named("pt").take(100_000) {
+        for pt in c.children_named("pt").take(MAX_CACHE_POINTS) {
             let i = pt.u32("idx").unwrap_or(0) as usize;
+            if i >= cap {
+                continue;
+            }
             let v = pt.child("v").map(|v| v.text()).unwrap_or_default();
             if i >= out.len() {
-                if i >= 100_000 {
-                    continue;
-                }
                 out.resize(i + 1, String::new());
             }
             if let Some(s) = out.get_mut(i) {
@@ -59,17 +74,19 @@ fn strings(e: &El) -> Vec<String> {
     if let Some(ml) = e.find("multiLvlStrCache") {
         // Use the innermost level.
         if let Some(l) = ml.child("lvl") {
-            return l.children_named("pt").map(|p| p.child("v").map(|v| v.text()).unwrap_or_default()).collect();
+            return l.children_named("pt").take(cap).map(|p| p.child("v").map(|v| v.text()).unwrap_or_default()).collect();
         }
     }
-    if let Some(v) = e.child("v") {
+    if cap > 0
+        && let Some(v) = e.child("v")
+    {
         return vec![v.text()];
     }
     vec![]
 }
 
-fn numbers(e: &El) -> Vec<Option<f64>> {
-    strings(e).into_iter().map(|s| s.trim().parse::<f64>().ok().filter(|v| v.is_finite())).collect()
+fn numbers(e: &El, budget: &mut usize) -> Vec<Option<f64>> {
+    strings(e, budget).into_iter().map(|s| s.trim().parse::<f64>().ok().filter(|v| v.is_finite())).collect()
 }
 
 /// Parse a chart part. Returns `None` for something that isn't a chart we can read.
@@ -86,6 +103,11 @@ pub fn read_chart_xml(bytes: &[u8]) -> Option<Chart> {
 }
 
 pub(crate) fn chart_from(root: &El) -> Option<Chart> {
+    chart_within(root, MAX_CHART_POINTS)
+}
+
+/// [`chart_from`] decoding at most `budget` data slots in all.
+fn chart_within(root: &El, mut budget: usize) -> Option<Chart> {
     let ch = root.child("chart")?;
     let pa = ch.child("plotArea")?;
     let mut c = Chart { categories: vec![], series: vec![], title: None, legend: None, gridlines: false, ..Default::default() };
@@ -190,7 +212,7 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
         let secondary = val_axis.is_some() && val_axis != primary_val;
         for s in g.children_named("ser").take(1000) {
             let mut ser = Series {
-                name: s.child("tx").map(strings).and_then(|v| v.into_iter().next()).unwrap_or_default(),
+                name: s.child("tx").map(|t| strings(t, &mut budget)).and_then(|v| v.into_iter().next()).unwrap_or_default(),
                 fill: simple_fill(s.child("spPr")),
                 line: simple_line(s.child("spPr")),
                 smooth: s.child("smooth").and_then(|v| v.bool("val")).unwrap_or(false),
@@ -201,6 +223,11 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
             };
             if let Some(d) = s.child("dLbls").and_then(|d| d.child("showVal")).and_then(|v| v.bool("val")) {
                 ser.data_labels = Some(d);
+            }
+            for t in s.children_named("trendline").take(16) {
+                if let Some(t) = trendline(t) {
+                    ser.trendlines.push(t);
+                }
             }
             // Data labels' number format: the series' labels', the group's, else the source data's.
             let label_fmt = |d: Option<&El>| {
@@ -218,7 +245,7 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
                 }
             }
             if let Some(cat) = s.child("cat").or_else(|| s.child("xVal")) {
-                let cats = strings(cat);
+                let cats = strings(cat, &mut budget);
                 if matches!(kind, ChartType::Scatter | ChartType::Bubble) {
                     ser.x_values = cats.iter().map(|v| v.trim().parse::<f64>().ok()).collect();
                 }
@@ -227,10 +254,10 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
                 }
             }
             if let Some(v) = s.child("val").or_else(|| s.child("yVal")) {
-                ser.values = numbers(v);
+                ser.values = numbers(v, &mut budget);
             }
             if let Some(b) = s.child("bubbleSize") {
-                ser.sizes = numbers(b);
+                ser.sizes = numbers(b, &mut budget);
             }
             c.series.push(ser);
         }
@@ -249,7 +276,22 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
     let by_id = |id: &Option<String>| pa.children_named("valAx").find(|a| id.is_some() && a.child_val("axId") == id.as_deref());
     let val_ax = by_id(&primary_val).or_else(|| pa.children_named("valAx").find(vertical)).or_else(|| pa.children_named("valAx").last());
     let num = |a: &El, k: &str| a.child_val(k).and_then(|v| v.parse::<f64>().ok()).filter(|v| v.is_finite());
-    let format_code = |a: &El| a.child("numFmt").and_then(|n| n.attr("formatCode")).map(str::to_string);
+    // An axis' number format: its own unless linked to the source (`sourceLinked="1"`, or no
+    // c:numFmt at all), in which case the data's format of the first series plotted on it.
+    let source_format = |ax: &El| {
+        let id = ax.child_val("axId");
+        pa.elements()
+            .filter(|g| g.children_named("axId").any(|a| a.attr("val") == id))
+            .flat_map(|g| g.children_named("ser"))
+            .find_map(|s| {
+                s.child("val").or_else(|| s.child("yVal")).and_then(|v| v.find("numCache")).and_then(|c| c.child("formatCode")).map(|f| f.text())
+            })
+            .filter(|f| !f.is_empty() && f != "General")
+    };
+    let format_code = |a: &El| match a.child("numFmt") {
+        Some(n) if n.attr("sourceLinked") != Some("1") => n.attr("formatCode").map(str::to_string),
+        n => source_format(a).or_else(|| n.and_then(|n| n.attr("formatCode")).map(str::to_string)),
+    };
     let deleted = |a: &El| a.child("delete").and_then(|d| d.bool("val")) == Some(true);
     if c.kind == ChartType::Combo && c.series.iter().any(|s| s.secondary_axis) {
         let primary_id = val_ax.and_then(|a| a.child_val("axId"));
@@ -285,6 +327,33 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
     Some(c)
 }
 
+fn trend_num(e: &El, k: &str) -> Option<f64> {
+    e.child_val(k).and_then(|v| v.parse::<f64>().ok()).filter(|v| v.is_finite() && v.abs() <= 1.0e12)
+}
+
+fn trend_name(s: &str) -> Option<String> {
+    let cleaned: String =
+        s.chars().filter(|c| matches!(c, '\t' | '\n' | '\r') || (*c >= ' ' && *c != '\u{FFFE}' && *c != '\u{FFFF}')).take(255).collect();
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() { None } else { Some(cleaned.to_string()) }
+}
+
+/// One `c:trendline`. Unknown types are skipped.
+fn trendline(e: &El) -> Option<Trendline> {
+    let kind = TrendlineType::from_xml(e.child_val("trendlineType")?)?;
+    Some(Trendline {
+        kind,
+        name: e.child("name").map(|n| n.text()).as_deref().and_then(trend_name),
+        order: if kind == TrendlineType::Poly { e.child("order").and_then(|o| o.u32("val")).map(|v| v.clamp(2, 6)) } else { None },
+        period: if kind == TrendlineType::MovingAvg { e.child("period").and_then(|o| o.u32("val")).map(|v| v.clamp(2, 255)) } else { None },
+        forward: trend_num(e, "forward"),
+        backward: trend_num(e, "backward"),
+        intercept: trend_num(e, "intercept"),
+        disp_eq: e.child("dispEq").and_then(|d| d.bool("val")).unwrap_or(false),
+        disp_r_sqr: e.child("dispRSqr").and_then(|d| d.bool("val")).unwrap_or(false),
+    })
+}
+
 /// The size in points of the first `a:defRPr` or `a:rPr` with one under `e` (`sz` in hundredths).
 fn text_size(e: Option<&El>) -> Option<f64> {
     fn rec(e: &El, depth: usize) -> Option<f64> {
@@ -309,6 +378,32 @@ fn text_size(e: Option<&El>) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sparse_caches_share_one_chart_wide_budget() {
+        // Every series declares 100000 points but writes one: without a chart-wide budget each
+        // would expand to the full count.
+        let ser = |n: usize| {
+            format!(
+                r#"<c:ser><c:idx val="{n}"/><c:val><c:numRef><c:numCache><c:ptCount val="100000"/><c:pt idx="0"><c:v>{n}</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"#
+            )
+        };
+        let sers: String = (0..5).map(ser).collect();
+        let xml = format!(
+            r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:barChart><c:barDir val="col"/>{sers}</c:barChart></c:plotArea></c:chart></c:chartSpace>"#
+        );
+        let doc = crate::xml::parse(xml.as_bytes()).unwrap();
+        let c = chart_within(&doc.root, 250_000).unwrap();
+        let total: usize = c.series.iter().map(|s| s.values.len()).sum();
+        assert!(total <= 250_000, "{total}");
+        assert_eq!(c.series.len(), 5);
+        assert_eq!(c.series[0].values.len(), 100_000);
+        assert_eq!(c.series[0].values[0], Some(0.0));
+        assert!(c.series[4].values.is_empty(), "the budget ran out before the last series");
+        // A small chart is untouched by the default budget.
+        let c = chart_from(&doc.root).unwrap();
+        assert!(c.series.iter().all(|s| s.values.len() == 100_000));
+    }
 
     #[test]
     fn legend_position_and_overlay_are_read() {
@@ -364,6 +459,20 @@ mod tests {
     }
 
     #[test]
+    fn linked_axis_formats_come_from_the_data() {
+        // No c:numFmt on the value axis, or a source-linked one: the series' own format.
+        let xml = |ax_fmt: &str| {
+            format!(
+                r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:plotArea><c:barChart><c:barDir val="col"/><c:ser><c:idx val="0"/><c:val><c:numRef><c:numCache><c:formatCode>#,##0</c:formatCode><c:ptCount val="1"/><c:pt idx="0"><c:v>1200</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser><c:axId val="1"/><c:axId val="2"/></c:barChart><c:catAx><c:axId val="1"/></c:catAx><c:valAx><c:axId val="2"/>{ax_fmt}<c:axPos val="l"/></c:valAx></c:plotArea></c:chart></c:chartSpace>"#
+            )
+        };
+        let fmt = |x: &str| read_chart_xml(xml(x).as_bytes()).unwrap().y_format;
+        assert_eq!(fmt("").as_deref(), Some("#,##0"));
+        assert_eq!(fmt(r#"<c:numFmt formatCode="General" sourceLinked="1"/>"#).as_deref(), Some("#,##0"));
+        assert_eq!(fmt(r#"<c:numFmt formatCode="0.0" sourceLinked="0"/>"#).as_deref(), Some("0.0"));
+    }
+
+    #[test]
     fn text_sizes_are_read_from_the_file() {
         // PowerPoint's new charts set the axes' and legend's text to 11.97 pt and the title's to
         // 18.62 pt; a chart that only sets its overall text size uses it everywhere.
@@ -387,5 +496,24 @@ mod tests {
             r#"<c:chartSpace {ns}><c:chart><c:plotArea><c:barChart><c:barDir val="col"/></c:barChart></c:plotArea></c:chart></c:chartSpace>"#
         );
         assert_eq!(read_chart_xml(xml.as_bytes()).unwrap().text_size, None, "no sizes: the renderer picks one");
+    }
+
+    #[test]
+    fn trendlines_are_read() {
+        let xml = br#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:lineChart><c:grouping val="standard"/><c:ser><c:idx val="0"/><c:tx><c:v>Spend</c:v></c:tx>
+<c:trendline><c:name>Fit &amp; forecast</c:name><c:trendlineType val="linear"/><c:forward val="1"/><c:backward val="0.5"/><c:intercept val="0"/><c:dispRSqr val="1"/><c:dispEq val="1"/></c:trendline>
+<c:trendline><c:trendlineType val="poly"/><c:order val="9"/></c:trendline>
+<c:trendline><c:trendlineType val="movingAvg"/><c:period val="3"/></c:trendline>
+<c:trendline><c:trendlineType val="notAType"/></c:trendline>
+<c:val><c:numLit><c:ptCount val="1"/><c:pt idx="0"><c:v>1</c:v></c:pt></c:numLit></c:val></c:ser></c:lineChart></c:plotArea></c:chart></c:chartSpace>"#;
+        let c = read_chart_xml(xml).unwrap();
+        let t = &c.series[0].trendlines;
+        assert_eq!(t.len(), 3);
+        assert_eq!(t[0].name.as_deref(), Some("Fit & forecast"));
+        assert_eq!(t[0].kind, TrendlineType::Linear);
+        assert_eq!((t[0].forward, t[0].backward, t[0].intercept), (Some(1.0), Some(0.5), Some(0.0)));
+        assert!(t[0].disp_eq && t[0].disp_r_sqr);
+        assert_eq!((t[1].kind, t[1].order), (TrendlineType::Poly, Some(6)));
+        assert_eq!((t[2].kind, t[2].period), (TrendlineType::MovingAvg, Some(3)));
     }
 }

@@ -14,8 +14,8 @@ use std::sync::Arc;
 use deckcraft_geom::{Size, emu_to_pt};
 use deckcraft_model::text::TextBody;
 use deckcraft_model::{
-    Background, Comment, CustomShow, Geom, HeaderFooter, Layout, LayoutId, LayoutType, Master, MasterId, MediaId, MediaItem, PhType, Presentation,
-    Properties, Section, ShowSettings, Slide, SlideId, defaults,
+    Background, Comment, CustomShow, EmbeddedFont, Geom, HeaderFooter, Layout, LayoutId, LayoutType, Master, MasterId, MediaId, MediaItem, PhType,
+    Presentation, Properties, Section, ShowSettings, Slide, SlideId, defaults,
 };
 
 use crate::PptxError;
@@ -32,6 +32,8 @@ pub struct Imp<'a> {
     pub custom_show_names: HashMap<String, String>,
     /// GUIDs (upper case) of the table styles the file defines.
     pub table_style_ids: Vec<String>,
+    /// Per legacy VML drawing part: shape id → preview picture part (see `shapes::vml_preview`).
+    pub vml_previews: HashMap<String, HashMap<String, String>>,
 }
 
 impl Imp<'_> {
@@ -71,16 +73,52 @@ pub struct Part {
     pub name: String,
     pub rels: Rels,
     pub ns: Vec<(String, String)>,
+    /// Prefixes bound below the root only (on a wrapper such as `mc:Choice`), each to one namespace.
+    pub inner_ns: Vec<(String, String)>,
 }
 
 impl Part {
     pub fn new(pkg: &Package, name: &str, doc: &Doc) -> Self {
-        Part { name: name.to_string(), rels: pkg.rels(name), ns: doc.ns_decls() }
+        let ns = doc.ns_decls();
+        Part { name: name.to_string(), rels: pkg.rels(name), inner_ns: inner_decls(&doc.root, &ns), ns }
     }
     /// Serialize an element with the namespace declarations it needs from the part root.
     pub fn keep(&self, el: &El) -> String {
         keep_xml(el, &self.ns)
     }
+    /// Like [`Part::keep`], also declaring prefixes that only an enclosing wrapper binds.
+    pub fn keep_inner(&self, el: &El) -> String {
+        let ns: Vec<(String, String)> = self.ns.iter().chain(&self.inner_ns).cloned().collect();
+        keep_xml(el, &ns)
+    }
+}
+
+/// Prefixes declared below the root but not on it, skipping any bound to different namespaces.
+fn inner_decls(root: &El, ns: &[(String, String)]) -> Vec<(String, String)> {
+    fn rec(e: &El, out: &mut Vec<(String, String)>, clash: &mut HashSet<String>, depth: usize) {
+        if depth > crate::xml::MAX_DEPTH {
+            return;
+        }
+        for (k, v) in e.attrs.iter().filter(|(k, _)| k.starts_with("xmlns:")) {
+            match out.iter().find(|(o, _)| o == k).map(|(_, u)| u != v) {
+                Some(true) => {
+                    clash.insert(k.clone());
+                }
+                Some(false) => {}
+                None => out.push((k.clone(), v.clone())),
+            }
+        }
+        for c in e.elements() {
+            rec(c, out, clash, depth + 1);
+        }
+    }
+    let mut out = vec![];
+    let mut clash = HashSet::new();
+    for c in root.elements() {
+        rec(c, &mut out, &mut clash, 1);
+    }
+    out.retain(|(k, _)| !clash.contains(k) && !ns.iter().any(|(r, _)| r == k));
+    out
 }
 
 /// Serialize `el`, declaring every prefix it uses that the source root declared.
@@ -119,8 +157,36 @@ pub fn keep_xml(el: &El, ns: &[(String, String)]) -> String {
 /// Namespace prefixes whose `mc:Choice` content we understand.
 const SUPPORTED_MC: [&str; 9] = ["p14", "p15", "p159", "a14", "a16", "p1510", "a15", "c14", "p188"];
 
+/// A relationship to an embedded 3-D model (`.glb`).
+pub(crate) fn is_model3d(rel: &opc::Rel) -> bool {
+    !rel.external && (rel.kind == "model3d" || rel.target.to_ascii_lowercase().ends_with(".glb"))
+}
+
+fn choice_has_model3d(el: &El, rels: &Rels) -> bool {
+    fn rec(el: &El, rels: &Rels, depth: usize) -> bool {
+        if depth > 16 {
+            return false;
+        }
+        if el.is("contentPart")
+            && let Some(id) = el.attr("r:id").filter(|s| !s.is_empty())
+            && rels.get(id).is_some_and(is_model3d)
+        {
+            return true;
+        }
+        el.elements().any(|c| rec(c, rels, depth + 1))
+    }
+    rec(el, rels, 0)
+}
+
 /// Replace every `mc:AlternateContent` by the children of the branch we can read best.
+/// A 3-D model choice is left in place (even when its `Requires` prefix is not one we otherwise
+/// understand) so the shape reader can keep the model and its fallback picture. Ink content parts
+/// still fall through to the fallback picture.
 pub fn resolve_mc(el: &mut El, depth: usize) {
+    resolve_mc_rels(el, depth, None);
+}
+
+fn resolve_mc_rels(el: &mut El, depth: usize, rels: Option<&Rels>) {
     if depth > crate::xml::MAX_DEPTH {
         return;
     }
@@ -129,6 +195,10 @@ pub fn resolve_mc(el: &mut El, depth: usize) {
         for c in std::mem::take(&mut el.children) {
             match c {
                 Node::El(ac) if ac.is("AlternateContent") => {
+                    if rels.is_some_and(|rels| ac.children_named("Choice").any(|ch| choice_has_model3d(ch, rels))) {
+                        out.push(Node::El(ac));
+                        continue;
+                    }
                     let choice = ac.children_named("Choice").find(|ch| {
                         let req_ok = ch.attr("Requires").unwrap_or("").split_whitespace().all(|r| SUPPORTED_MC.contains(&r));
                         // Ink content parts are not modelled; prefer their fallback picture.
@@ -157,13 +227,14 @@ pub fn resolve_mc(el: &mut El, depth: usize) {
         el.children = out;
     }
     for c in el.elements_mut() {
-        resolve_mc(c, depth + 1);
+        resolve_mc_rels(c, depth + 1, rels);
     }
 }
 
 fn load(pkg: &Package, name: &str) -> Option<Doc> {
     let mut d = pkg.xml(name)?;
-    resolve_mc(&mut d.root, 0);
+    let rels = pkg.rels(name);
+    resolve_mc_rels(&mut d.root, 0, Some(&rels));
     Some(d)
 }
 
@@ -233,6 +304,7 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
         slide_by_part: HashMap::new(),
         custom_show_names: HashMap::new(),
         table_style_ids: Vec::new(),
+        vml_previews: HashMap::new(),
     };
     // Slide ids first so hyperlinks anywhere can point at slides.
     let mut slide_ids: Vec<(u32, String, SlideId)> = vec![];
@@ -312,11 +384,23 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
             let np = Part::new(&pkg, &n.target, &nd);
             slide.notes = read_notes(&mut imp, &np, &nd.root);
         }
-        // Comments.
+        // Comments. A modern part and the legacy part can describe the same threads (PowerPoint
+        // writes both): the modern one wins, its flattened legacy copy is skipped.
+        let mut parts: Vec<(Doc, bool)> = vec![];
         for c in part.rels.all_of("comments") {
             if let Some(cd) = pkg.xml(&c.target) {
-                slide.comments.extend(read_comments(&pkg, &pres_part, &cd.root));
+                // The content type names the modern part; a package that types it only through a
+                // Default entry instead of an Override is still modern when its root is p188.
+                let modern = pkg.content_type(&c.target).as_deref() == Some(crate::write::CT_COMMENTS_MODERN) || cd.root.prefix() == "p188";
+                parts.push((cd, modern));
             }
+        }
+        let has_modern = parts.iter().any(|(_, m)| *m);
+        for (cd, modern) in parts {
+            if has_modern && !modern {
+                continue;
+            }
+            slide.comments.extend(read_comments(&pkg, &pres_part, &cd.root, modern));
         }
         file_slide_ids.insert(*file_id, *id);
         p.slides.push(Arc::new(slide));
@@ -377,11 +461,18 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
             let tp = Part::new(&pkg, &t.target, &td);
             m.theme = theme::read_theme(&mut imp, &tp, &td.root);
         }
-        if let Some(tree) = d.root.path(&["cSld", "spTree"]) {
-            m.shapes = shapes::sp_tree(&mut imp, &part, &mut ctx, tree, 0);
+        if let Some(csld) = d.root.child("cSld") {
+            m.background = background(&mut imp, &part, csld);
+            if let Some(tree) = csld.child("spTree") {
+                m.shapes = shapes::sp_tree(&mut imp, &part, &mut ctx, tree, 0);
+            }
         }
         if let Some(cm) = d.root.child("clrMap") {
             m.color_map = color_map(cm);
+        }
+        // Notes text styles are the body's list style; slide masters use title/body/other instead.
+        if let Some(ns) = d.root.child("notesStyle") {
+            m.body_style = dml::list_style(&mut imp, &part, ns);
         }
         p.notes_master = Some(Arc::new(m));
     }
@@ -399,10 +490,65 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
 
     inherit_placeholder_geometry(&mut p);
     p.header_footer = header_footer(&p);
+    p.embedded_fonts = read_embedded_fonts(&mut imp, &pres_part, pres_el);
     p.media = std::mem::take(&mut imp.media);
     p.next_id = imp.next;
     p.fix_next_id();
     Ok(p)
+}
+
+/// Embedded font faces in one file. Past this, further typefaces are dropped.
+const MAX_EMBEDDED_FONTS: usize = 64;
+/// One font part. A larger part is skipped; the rest of the file is still read.
+const MAX_FONT_BYTES: usize = 32 * 1024 * 1024;
+
+/// `p:embeddedFontLst`: each typeface and the font parts its four face slots point at.
+fn read_embedded_fonts(imp: &mut Imp, pres: &Part, root: &El) -> Vec<EmbeddedFont> {
+    let Some(list) = root.child("embeddedFontLst") else { return Vec::new() };
+    let mut out = Vec::new();
+    for e in list.children_named("embeddedFont").take(MAX_EMBEDDED_FONTS) {
+        let Some(font) = e.child("font") else { continue };
+        let Some(typeface) = font.attr("typeface").map(str::trim).filter(|t| !t.is_empty()) else { continue };
+        let typeface: String = typeface.chars().take(255).collect();
+        let slot = |imp: &mut Imp, name: &str| -> Option<MediaId> {
+            let id = e.child(name)?.attr("r:id")?;
+            let part = pres.rels.target(id)?;
+            let data = imp.pkg.get(part)?;
+            if data.is_empty() || data.len() > MAX_FONT_BYTES {
+                log::warn!("pptx: embedded font {part} skipped ({} bytes)", data.len());
+                return None;
+            }
+            imp.media_for(part)
+        };
+        let regular = slot(imp, "regular");
+        let bold = slot(imp, "bold");
+        let italic = slot(imp, "italic");
+        let bold_italic = slot(imp, "boldItalic");
+        if regular.is_none() && bold.is_none() && italic.is_none() && bold_italic.is_none() {
+            continue;
+        }
+        out.push(EmbeddedFont {
+            typeface,
+            panose: panose_attr(font),
+            pitch_family: byte_attr(font, "pitchFamily"),
+            charset: byte_attr(font, "charset"),
+            regular,
+            bold,
+            italic,
+            bold_italic,
+        });
+    }
+    out
+}
+
+fn byte_attr(el: &El, name: &str) -> Option<u8> {
+    u8::try_from(el.u32(name)?).ok()
+}
+
+/// `panose` is 20 hex digits (ST_Panose). Anything else is dropped.
+fn panose_attr(el: &El) -> Option<String> {
+    let v = el.attr("panose")?.trim();
+    (v.len() == 20 && v.chars().all(|c| c.is_ascii_hexdigit())).then(|| v.to_string())
 }
 
 fn sane_len(v: f64, dflt: f64) -> f64 {
@@ -746,7 +892,7 @@ fn read_notes(imp: &mut Imp, part: &Part, root: &El) -> TextBody {
     TextBody::default()
 }
 
-fn read_comments(pkg: &Package, pres: &Part, root: &El) -> Vec<Comment> {
+fn read_comments(pkg: &Package, pres: &Part, root: &El, modern: bool) -> Vec<Comment> {
     // Authors: legacy commentAuthors.xml (numeric ids) and modern authors.xml (GUIDs).
     let mut authors: HashMap<String, (String, String)> = HashMap::new();
     for kind in ["commentAuthors", "authors"] {
@@ -760,7 +906,9 @@ fn read_comments(pkg: &Package, pres: &Part, root: &El) -> Vec<Comment> {
             }
         }
     }
-    fn one(e: &El, authors: &HashMap<String, (String, String)>, depth: usize) -> Comment {
+    // Legacy positions are 1/8 pt; the modern part's p188:pos is an a:CT_Point2D in EMU.
+    let scale = if modern { 12_700.0 } else { 8.0 };
+    fn one(e: &El, authors: &HashMap<String, (String, String)>, depth: usize, scale: f64) -> Comment {
         let (author, initials) = e.attr("authorId").and_then(|a| authors.get(a).cloned()).unwrap_or_default();
         let text = if let Some(t) = e.child("text") {
             t.text()
@@ -771,7 +919,7 @@ fn read_comments(pkg: &Package, pres: &Part, root: &El) -> Vec<Comment> {
         };
         let pos = e.child("pos");
         let replies = if depth < 4 {
-            e.child("replyLst").map(|l| l.children_named("reply").take(1000).map(|r| one(r, authors, depth + 1)).collect()).unwrap_or_default()
+            e.child("replyLst").map(|l| l.children_named("reply").take(1000).map(|r| one(r, authors, depth + 1, scale)).collect()).unwrap_or_default()
         } else {
             vec![]
         };
@@ -780,14 +928,14 @@ fn read_comments(pkg: &Package, pres: &Part, root: &El) -> Vec<Comment> {
             initials,
             text,
             date: e.attr("dt").or(e.attr("created")).unwrap_or("").to_string(),
-            x: pos.and_then(|p| p.f64("x")).unwrap_or(0.0) / 8.0,
-            y: pos.and_then(|p| p.f64("y")).unwrap_or(0.0) / 8.0,
+            x: pos.and_then(|p| p.f64("x")).unwrap_or(0.0) / scale,
+            y: pos.and_then(|p| p.f64("y")).unwrap_or(0.0) / scale,
             resolved: e.attr("status") == Some("resolved"),
             replies,
             shape: None,
         }
     }
-    root.children_named("cm").take(10_000).map(|c| one(c, &authors, 0)).collect()
+    root.children_named("cm").take(10_000).map(|c| one(c, &authors, 0, scale)).collect()
 }
 
 fn read_show(sp: &El, shows: &HashMap<String, String>) -> ShowSettings {

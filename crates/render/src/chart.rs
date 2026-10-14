@@ -82,10 +82,6 @@ fn label(ctx: &mut RenderContext, rctx: &Ctx, m: Affine, text: &str, r: Rect, si
     crate::draw_text(ctx, rctx, &tmp, &body, r, m, &deckcraft_text::NoFields, None);
 }
 
-fn fmt_num(v: f64) -> String {
-    if (v - v.round()).abs() < 1e-9 { format!("{}", v.round() as i64) } else { format!("{v:.1}") }
-}
-
 /// Where the legend goes for `c:legendPos`, and the plot area left over.
 /// `size` is the legend block (width, height); the result is its top-left corner and the plot area.
 /// `r` (also the OOXML default and the fallback for unknown values) and `l` are vertical stacks centred
@@ -224,7 +220,7 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
                     ctx,
                     rctx,
                     m,
-                    &fmt_num(*v),
+                    &c.data_label(s, *v),
                     Rect::new(lp.x - 30.0, lp.y - 10.0, lp.x + 30.0, lp.y + 10.0),
                     base,
                     Align::Center,
@@ -246,6 +242,23 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
     // Bars are drawn first and lines over them; a combo chart has both.
     let bar_kind = c.series.iter().map(|s| c.series_kind(s)).find(|k| k.is_bar_like());
     let horiz = if combo { bar_kind.is_some_and(ChartType::horizontal) } else { c.kind.horizontal() };
+    // Axis titles: the left one turned to read upwards, the bottom one centred under the axis.
+    // On a horizontal bar chart the category axis is the left one.
+    let (left_title, bottom_title) =
+        if horiz { (c.axis_titles.0.as_deref(), c.axis_titles.1.as_deref()) } else { (c.axis_titles.1.as_deref(), c.axis_titles.0.as_deref()) };
+    let band_h = base * 1.6;
+    if let Some(t) = bottom_title.filter(|t| !t.is_empty()) {
+        let r = Rect::new(area.x0, area.y1 - band_h, area.x1, area.y1);
+        label(ctx, rctx, m, t, r, base, Align::Center, Anchor::Bottom, text_col, true);
+        area.y1 -= band_h + base * 0.3;
+    }
+    if let Some(t) = left_title.filter(|t| !t.is_empty()) {
+        let (cx, cy) = (area.x0 + band_h / 2.0, (area.y0 + area.y1) / 2.0);
+        let turned = m * Affine::translate((cx, cy)) * Affine::rotate(-std::f64::consts::FRAC_PI_2);
+        let half = area.height() / 2.0;
+        label(ctx, rctx, turned, t, Rect::new(-half, -band_h / 2.0, half, band_h / 2.0), base, Align::Center, Anchor::Middle, text_col, true);
+        area.x0 += band_h + base * 0.3;
+    }
     // As many major units as the value axis has room for labels (PowerPoint's automatic unit).
     let axis_len = if horiz { area.width() - base * 4.5 } else { area.height() - base * 1.8 };
     let max_intervals = (axis_len / if horiz { base * 6.0 } else { base * 1.9 }).floor().clamp(2.0, 12.0) as usize;
@@ -264,9 +277,9 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
     } else if c.y_hidden {
         base * 0.5
     } else {
-        label_w(false, (min, max, step)).clamp(base * 1.5, area.width() * 0.3)
+        clamp_soft(label_w(false, (min, max, step)), base * 1.5, area.width() * 0.3)
     };
-    let gutter_r = second.filter(|_| !c.y2_hidden).map(|sc| label_w(true, sc).clamp(base * 1.5, area.width() * 0.3)).unwrap_or(0.0);
+    let gutter_r = second.filter(|_| !c.y2_hidden).map(|sc| clamp_soft(label_w(true, sc), base * 1.5, area.width() * 0.3)).unwrap_or(0.0);
     let plot = if horiz {
         Rect::new(area.x0 + gutter, area.y0, area.x1, area.y1 - base * 1.6)
     } else {
@@ -276,10 +289,15 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
         crate::paint::fill_path(ctx, rctx, f, None, &plot.to_path(0.1), plot, m, deckcraft_geom::preset::FillMode::Norm, 1.0, rctx.pres);
     }
     let span = (max - min).max(1e-9);
-    let to_v = |v: f64| if horiz { plot.x0 + (v - min) / span * plot.width() } else { plot.y1 - (v - min) / span * plot.height() };
+    // Values past the axis limits (fixed ones, or zero on an axis that starts above it) stop at
+    // the plot's edge.
+    let to_v = |v: f64| {
+        let v = v.max(min).min(max);
+        if horiz { plot.x0 + (v - min) / span * plot.width() } else { plot.y1 - (v - min) / span * plot.height() }
+    };
     // A series' value as a position on its own axis.
     let to_axis = |sec: bool, v: f64| match (sec, second) {
-        (true, Some((min2, max2, _))) => plot.y1 - (v - min2) / (max2 - min2).max(1e-9) * plot.height(),
+        (true, Some((min2, max2, _))) => plot.y1 - (v.max(min2).min(max2) - min2) / (max2 - min2).max(1e-9) * plot.height(),
         _ => to_v(v),
     };
     // Gridlines and value labels.
@@ -378,7 +396,7 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
             );
         }
     }
-    let zero = to_v(0.0f64.clamp(min, max));
+    let zero = to_v(clamp_soft(0.0, min, max));
     if let Some(bk) = bar_kind {
         let bars: Vec<(usize, &deckcraft_model::chart::Series)> =
             c.series.iter().enumerate().filter(|(_, s)| c.series_kind(s).is_bar_like()).collect();
@@ -524,6 +542,13 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
     ctx.set_paint(color(Rgba::rgb(0xBF, 0xBF, 0xBF), 1.0));
     ctx.set_stroke(kurbo::Stroke::new(0.75));
     ctx.stroke_path(&ax);
+}
+
+/// `v` kept within `lo..=hi` without `f64::clamp`'s panic when `lo > hi` (a chart smaller than
+/// its label font) or a bound is NaN: the upper bound wins.
+pub(crate) fn clamp_soft(v: f64, lo: f64, hi: f64) -> f64 {
+    let v = if v < lo { lo } else { v };
+    if v > hi { hi } else { v }
 }
 
 #[cfg(test)]

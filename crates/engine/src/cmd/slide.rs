@@ -47,7 +47,15 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!("section.removeAll", "Remove All Sections", ["Home", "Slides", "Section"], None, "{}", has_slide, section_remove_all),
         cmd!("section.move", "Move Section", [], None, "{index, to}", has_slide, section_move),
-        cmd!("slide.fromOutline", "Slides from Outline…", ["Insert", "Slides From"], None, "{text}", has_doc, from_outline),
+        cmd!(
+            "slide.fromOutline",
+            "Slides from Outline…",
+            ["Insert", "Slides From"],
+            None,
+            "{text, markdown?: bool (headings are slides, list items bullets)}",
+            has_doc,
+            from_outline
+        ),
     ]
 }
 
@@ -108,7 +116,12 @@ fn new(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(b) = str_param(p, "body")
             && let Some(sh) = slide.shapes.iter_mut().find(|x| x.ph_type().is_some_and(|k| !k.is_title()))
         {
-            sh.text = Some(TextBody::from_text(b));
+            let mut body = TextBody::from_text(b);
+            // Leading tabs set the outline level, as in text.set.
+            for para in &mut body.paragraphs {
+                super::text::apply_leading_tabs(para);
+            }
+            sh.text = Some(body);
         }
         let at = usize_param(p, "at").unwrap_or(if doc.slides.is_empty() { 0 } else { sel.slide + 1 }).min(doc.slides.len());
         let id = slide.id;
@@ -166,24 +179,9 @@ fn duplicate(s: &mut Session, p: &Value) -> Result<Value> {
             let Some(src) = doc.slides.get(*i).map(|x| x.as_ref().clone()) else { continue };
             let mut copy = src;
             copy.id = SlideId(doc.alloc_id());
-            super::edit::reid(doc, &mut copy.shapes);
-            // Animations follow the new shape ids by position.
-            let old_ids: Vec<_> = doc
-                .slides
-                .get(*i)
-                .map(|x| {
-                    let mut v = vec![];
-                    deckcraft_model::walk(&x.shapes, &mut |sh, _| v.push(sh.id));
-                    v
-                })
-                .unwrap_or_default();
-            let mut new_shape_ids = vec![];
-            deckcraft_model::walk(&copy.shapes, &mut |sh, _| new_shape_ids.push(sh.id));
-            for a in &mut copy.animations {
-                if let Some(pos) = old_ids.iter().position(|x| *x == a.shape) {
-                    a.shape = new_shape_ids.get(pos).copied().unwrap_or(a.shape);
-                }
-            }
+            // Animations follow the new shape ids, triggers included.
+            let map = super::edit::reid(doc, &mut copy.shapes);
+            super::edit::remap_animations(&mut copy.animations, &map);
             let section = doc.section_of(src_id(doc, *i));
             let at = (last + 1 + k).min(doc.slides.len());
             new_ids.push(copy.id);
@@ -283,9 +281,16 @@ fn go_to(s: &mut Session, i: usize) -> Result<Value> {
 fn go(s: &mut Session, p: &Value) -> Result<Value> {
     let i = match (usize_param(p, "index"), p.get("id").and_then(Value::as_u64)) {
         (Some(i), _) => i,
-        (None, Some(id)) => s.doc()?.doc.slide_index(SlideId(u32::try_from(id).unwrap_or(0))).ok_or_else(|| bad("slide.go", "no such slide"))?,
+        (None, Some(id)) => s
+            .doc()?
+            .doc
+            .slide_index(SlideId(u32::try_from(id).map_err(|_| bad("slide.go", "no such slide"))?))
+            .ok_or_else(|| bad("slide.go", "no such slide"))?,
         _ => return Err(bad("slide.go", "missing `index`")),
     };
+    if i >= s.doc()?.doc.slides.len() {
+        return Err(bad("slide.go", format!("no slide {i}")));
+    }
     go_to(s, i)
 }
 fn next(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -572,10 +577,11 @@ fn section_move(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn from_outline(s: &mut Session, p: &Value) -> Result<Value> {
     let text = str_param(p, "text").unwrap_or("").to_string();
+    let markdown = bool_param(p, "markdown").unwrap_or(false);
     s.edit(|doc, sel| {
         let before = doc.slides.len();
-        let n = deckcraft_format::outline_to_slides(doc, &text);
-        // outline_to_slides appends; move them after the current slide.
+        let n = if markdown { deckcraft_format::markdown_to_slides(doc, &text) } else { deckcraft_format::outline_to_slides(doc, &text) };
+        // both append; move them after the current slide.
         let at = (sel.slide + 1).min(before);
         let new: Vec<_> = doc.slides.drain(before..).collect();
         for (k, sl) in new.into_iter().enumerate() {
@@ -583,4 +589,25 @@ fn from_outline(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(json!({"slides": n}))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::Session;
+
+    #[test]
+    fn new_slide_body_leading_tabs_become_levels() {
+        let mut s = Session::with_new();
+        let text = "Level one\n\tLevel two\n\t\tLevel three\nLevel one again";
+        s.execute("slide.new", &json!({"layout": "titleAndContent", "title": "Indent", "body": text})).expect("new slide");
+        let st = s.doc().expect("doc");
+        let slide = st.doc.slides.get(st.selection.slide).expect("slide");
+        let body = slide.shapes.iter().find(|x| x.ph_type().is_some_and(|k| !k.is_title())).expect("body");
+        let paras = &body.text.as_ref().expect("text").paragraphs;
+        let got: Vec<(u8, String)> = paras.iter().map(|p| (p.level, p.text())).collect();
+        let want = [(0, "Level one"), (1, "Level two"), (2, "Level three"), (0, "Level one again")];
+        assert_eq!(got, want.iter().map(|(l, t)| (*l, t.to_string())).collect::<Vec<_>>());
+    }
 }

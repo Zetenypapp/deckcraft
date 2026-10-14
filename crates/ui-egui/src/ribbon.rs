@@ -53,6 +53,9 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
         if icon_toggle(&mut child, Icon::Save, "Save (⌘S)", has_doc, false).clicked() {
             app.save();
         }
+        if icon_toggle(&mut child, Icon::Export, "Export…", has_doc, false).clicked() {
+            let _ = app.run("app.exportDialog", json!({}));
+        }
         if icon_toggle(&mut child, Icon::Undo, "Undo (⌘Z)", enabled(app, "edit.undo"), false).clicked() {
             run(app, "edit.undo", json!({}));
         }
@@ -298,6 +301,9 @@ fn clipboard_group(app: &mut SlideApp, ui: &mut Ui) {
                 if ui.button("Paste and Match Formatting").clicked() {
                     run(app, "edit.pasteText", json!({}));
                 }
+                if ui.button("Paste Special…").clicked() {
+                    run(app, "app.pasteSpecial", json!({}));
+                }
                 if ui.button("Paste Formatting").clicked() {
                     run(app, "format.painterApply", json!({}));
                 }
@@ -443,6 +449,12 @@ fn font_group(app: &mut SlideApp, ui: &mut Ui, st: &Value) {
                             ui.separator();
                         }
                     }
+                    ui.separator();
+                    // Fonts installed while DeckCraft runs (e.g. into ~/.local/share/fonts).
+                    if ui.button("Rescan Installed Fonts").clicked() {
+                        run(app, "font.rescan", json!({}));
+                        ui.close();
+                    }
                 });
                 let size_text = size.map(|s| widgets::fmt_num(s, "")).unwrap_or_default();
                 dropdown(ui, "size", &size_text, 52.0, en, |ui| {
@@ -562,6 +574,12 @@ fn paragraph_group(app: &mut SlideApp, ui: &mut Ui, st: &Value) {
                                 run(app, "format.bullets", json!({"on": true, "char": ch}));
                             }
                         }
+                        ui.separator();
+                        if ui.button("Bullets and Numbering…").clicked() {
+                            let mut dlg = crate::dialogs::Dialog::new("bullets");
+                            dlg.fields.insert("tab".into(), "bulleted".into());
+                            app.dialog = Some(dlg);
+                        }
                     });
                 }
                 let (m, a) = small_button_ex(ui, Icon::Numbering, "", en, b("numbering"), true);
@@ -585,6 +603,12 @@ fn paragraph_group(app: &mut SlideApp, ui: &mut Ui, st: &Value) {
                             if ui.button(label).clicked() {
                                 run(app, "format.numbering", json!({"on": true, "scheme": sch}));
                             }
+                        }
+                        ui.separator();
+                        if ui.button("Bullets and Numbering…").clicked() {
+                            let mut dlg = crate::dialogs::Dialog::new("bullets");
+                            dlg.fields.insert("tab".into(), "numbered".into());
+                            app.dialog = Some(dlg);
                         }
                     });
                 }
@@ -1005,6 +1029,8 @@ fn home(app: &mut SlideApp, ui: &mut Ui) {
     });
     drawing_group(app, ui);
     group(ui, |ui| {
+        // Also under Arrange, but that is disabled until something is selected (#132).
+        big(app, ui, Icon::SelectionPane, "Selection\nPane", "view.pane", json!({"pane": "selection"}));
         big(app, ui, Icon::DesignIdeas, "Design\nIdeas", "view.pane", json!({"pane": "designer"}));
     });
 }
@@ -1047,8 +1073,8 @@ fn insert(app: &mut SlideApp, ui: &mut Ui) {
                 app.session.set_tool(deckcraft_engine::ToolKind::Shape { preset: p.to_string() });
             }
         });
-        let r = big_button(ui, Icon::Icons, "Icons", enabled(app, "shape.insert"));
-        egui::Popup::menu(&r).width(260.0).show(|ui| icon_library(app, ui));
+        let r = big_button(ui, Icon::Icons, "Icons", enabled(app, "insert.icon"));
+        egui::Popup::menu(&r).width(340.0).show(|ui| icon_library(app, ui));
         big(app, ui, Icon::SmartArt, "SmartArt", "app.dialog", json!({"id": "smartart"}));
         let r = big_button(ui, Icon::Chart, "Chart", enabled(app, "insert.chart"));
         egui::Popup::menu(&r).show(|ui| {
@@ -1128,51 +1154,96 @@ pub fn table_grid_picker(ui: &mut Ui) -> Option<(usize, usize)> {
     if resp.clicked() && hover.0 > 0 { Some(hover) } else { None }
 }
 
-/// A small built-in icon library: our own simple pictograms built from preset shapes.
+/// Lucide stroke icons (Insert › Icons). Search filters the gallery; a click inserts the outline.
 fn icon_library(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    let items: [(&str, &str); 24] = [
-        ("star5", "Star"),
-        ("heart", "Heart"),
-        ("lightningBolt", "Lightning"),
-        ("sun", "Sun"),
-        ("moon", "Moon"),
-        ("cloud", "Cloud"),
-        ("smileyFace", "Smile"),
-        ("noSmoking", "Not allowed"),
-        ("mathPlus", "Plus"),
-        ("mathMultiply", "Multiply"),
-        ("mathEqual", "Equals"),
-        ("chevron", "Chevron"),
-        ("rightArrow", "Arrow"),
-        ("quadArrow", "Move"),
-        ("uturnArrow", "Return"),
-        ("flowChartDecision", "Decision"),
-        ("flowChartMagneticDisk", "Database"),
-        ("flowChartDocument", "Document"),
-        ("wedgeRoundRectCallout", "Speech"),
-        ("cloudCallout", "Thought"),
-        ("teardrop", "Pin"),
-        ("donut", "Ring"),
-        ("irregularSeal1", "Burst"),
-        ("ribbon2", "Banner"),
-    ];
-    ui.horizontal_wrapped(|ui| {
-        for (preset, label) in items {
-            let (r, resp) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
-            if resp.hovered() {
-                ui.painter().rect_filled(r, CornerRadius::same(4), t.hover);
+    let (color, hover) = (t.text, t.hover);
+    let id = ui.id().with("icon-query");
+    let mut query = ui.data_mut(|d| d.get_temp::<String>(id).unwrap_or_default());
+    ui.add(egui::TextEdit::singleline(&mut query).hint_text("Search icons").desired_width(ui.available_width()));
+    let q = query.trim().to_lowercase();
+    ui.data_mut(|d| d.insert_temp(id, query));
+    let icons = deckcraft_engine::icons::icons();
+    egui::ScrollArea::vertical().id_salt("icon-scroll").max_height(420.0).show(ui, |ui| {
+        if q.is_empty() {
+            let mut cats: Vec<&str> = Vec::new();
+            for icon in icons {
+                if !cats.contains(&icon.category) {
+                    cats.push(icon.category);
+                }
             }
-            paint_preset(ui.painter(), r.shrink(6.0), preset, t.text, t.text);
-            if resp.on_hover_text(label).clicked() {
-                let size = app.session.active().map(|d| d.doc.slide_size).unwrap_or(deckcraft_model::defaults::WIDE);
-                let _ = app.run("shape.insert", json!({"preset": preset, "rect": [size.width / 2.0 - 48.0, size.height / 2.0 - 48.0, 96, 96]}));
-                let _ = app.run("shape.fill", json!({"color": "tx1"}));
-                let _ = app.run("shape.line", json!({"none": true}));
-                ui.close();
+            for cat in cats {
+                ui.label(egui::RichText::new(cat).small().strong());
+                ui.horizontal_wrapped(|ui| {
+                    for icon in icons.iter().filter(|i| i.category == cat) {
+                        icon_cell(app, ui, icon, color, hover);
+                    }
+                });
+            }
+        } else {
+            let mut n = 0;
+            ui.horizontal_wrapped(|ui| {
+                for icon in icons {
+                    if icon.name.contains(&q) || icon.label.to_lowercase().contains(&q) {
+                        icon_cell(app, ui, icon, color, hover);
+                        n += 1;
+                    }
+                }
+            });
+            if n == 0 {
+                ui.label("No icons match.");
             }
         }
     });
+}
+
+fn icon_cell(app: &mut SlideApp, ui: &mut Ui, icon: &deckcraft_engine::icons::Icon, color: Color32, hover: Color32) {
+    let (r, resp) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(r, CornerRadius::same(4), hover);
+    }
+    paint_icon(ui.painter(), r.shrink(6.0), icon, color);
+    if resp.on_hover_text(icon.label).clicked() {
+        let _ = app.run("insert.icon", json!({"name": icon.name}));
+        ui.close();
+    }
+}
+
+/// Stroke a Lucide outline into a gallery cell. The line is the design stroke scaled to the cell.
+fn paint_icon(p: &egui::Painter, r: Rect, icon: &deckcraft_engine::icons::Icon, color: Color32) {
+    let Some(src) = deckcraft_engine::icons::outline(icon.name) else { return };
+    let mut bp = src.clone();
+    let (w, h) = (r.width().max(1.0) as f64, r.height().max(1.0) as f64);
+    bp.apply_affine(deckcraft_geom::Affine::scale_non_uniform(w / deckcraft_engine::icons::VIEW, h / deckcraft_engine::icons::VIEW));
+    let sw = ((r.width() * icon.stroke as f32) / deckcraft_engine::icons::VIEW as f32).clamp(1.0, 3.5);
+    let mut pts: Vec<egui::Pos2> = vec![];
+    let mut polys: Vec<(Vec<egui::Pos2>, bool)> = vec![];
+    kurbo_flatten(&bp, |el| match el {
+        Fl::Move(x, y) => {
+            if pts.len() > 1 {
+                polys.push((std::mem::take(&mut pts), false));
+            }
+            pts.clear();
+            pts.push(pos2(r.min.x + x as f32, r.min.y + y as f32));
+        }
+        Fl::Line(x, y) => pts.push(pos2(r.min.x + x as f32, r.min.y + y as f32)),
+        Fl::Close => {
+            if pts.len() > 1 {
+                polys.push((std::mem::take(&mut pts), true));
+            }
+        }
+    });
+    if pts.len() > 1 {
+        polys.push((pts, false));
+    }
+    for (poly, closed) in polys {
+        p.add(egui::Shape::Path(egui::epaint::PathShape {
+            points: poly,
+            closed,
+            fill: Color32::TRANSPARENT,
+            stroke: egui::epaint::PathStroke::new(sw, color),
+        }));
+    }
 }
 
 // ---------- Draw ----------
@@ -1395,6 +1466,47 @@ fn transitions(app: &mut SlideApp, ui: &mut Ui) {
         });
     });
     group(ui, |ui| {
+        // Sound in its own column, so the timing column keeps its three rows.
+        rows(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Sound:");
+                let stop = cur.as_ref().is_some_and(|t| t.stop_sound);
+                let name = cur
+                    .as_ref()
+                    .and_then(|t| t.sound)
+                    .and_then(|m| app.session.active().and_then(|d| d.doc.media(m).map(|i| i.name.trim_end_matches(".wav").to_string())))
+                    .unwrap_or_else(|| if stop { "[Stop Previous Sound]".into() } else { "[No Sound]".into() });
+                egui::ComboBox::from_id_salt("transition_sound").width(140.0).selected_text(name).show_ui(ui, |ui| {
+                    let none = cur.as_ref().is_none_or(|t| t.sound.is_none() && !t.stop_sound);
+                    if ui.selectable_label(none, "[No Sound]").clicked() {
+                        run(app, "transition.sound", json!({"none": true}));
+                    }
+                    if ui.selectable_label(stop, "[Stop Previous Sound]").clicked() {
+                        run(app, "transition.sound", json!({"stopPrevious": true}));
+                    }
+                    ui.separator();
+                    for (id, label) in deckcraft_engine::sounds::BUILTIN {
+                        if ui.button(label).clicked() {
+                            let lp = cur.as_ref().is_some_and(|t| t.sound_loop);
+                            run(app, "transition.sound", json!({"builtin": id, "loop": lp}));
+                        }
+                    }
+                    ui.separator();
+                    let can_pick = app.services.pick_open.is_some();
+                    let r = ui.add_enabled(can_pick, egui::Button::new("Other Sound…"));
+                    if r.clicked() {
+                        app.pick_transition_sound();
+                    }
+                    r.on_disabled_hover_text("Choosing a sound file needs the desktop app");
+                    ui.separator();
+                    let has = cur.as_ref().is_some_and(|t| t.sound.is_some());
+                    let mut lp = cur.as_ref().is_some_and(|t| t.sound_loop);
+                    if ui.add_enabled(has, egui::Checkbox::new(&mut lp, "Loop Until Next Sound")).changed() {
+                        run(app, "transition.sound", json!({"loop": lp}));
+                    }
+                });
+            });
+        });
         rows(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Duration:");
@@ -1783,6 +1895,23 @@ fn record(app: &mut SlideApp, ui: &mut Ui) {
     });
 }
 
+fn comment_nav(app: &mut SlideApp, ui: &mut Ui, forward: bool) {
+    let (icon, label, id) = if forward { (Icon::NextComment, "Next", "comment.next") } else { (Icon::PrevComment, "Previous", "comment.prev") };
+    if small_button(ui, icon, label, enabled(app, id), false).on_hover_text(tip(id, label)).clicked() {
+        let params = match app.ui.comment_focus {
+            Some((slide, index)) if app.session.active().is_some_and(|d| d.selection.slide == slide) => json!({"slide": slide, "index": index}),
+            _ => json!({}),
+        };
+        if let Ok(v) = app.run(id, params)
+            && let (Some(slide), Some(index)) = (v.get("slide").and_then(Value::as_u64), v.get("index").and_then(Value::as_u64))
+            && let (Ok(slide), Ok(index)) = (usize::try_from(slide), usize::try_from(index))
+        {
+            app.ui.comment_focus = Some((slide, index));
+            app.ui.pane = Some("comments".into());
+        }
+    }
+}
+
 fn review(app: &mut SlideApp, ui: &mut Ui) {
     group(ui, |ui| {
         big(app, ui, Icon::Spelling, "Spelling", "app.dialog", json!({"id": "spelling"}));
@@ -1799,6 +1928,10 @@ fn review(app: &mut SlideApp, ui: &mut Ui) {
     });
     group(ui, |ui| {
         big(app, ui, Icon::NewComment, "New\nComment", "app.dialog", json!({"id": "comment"}));
+        rows(ui, |ui| {
+            comment_nav(app, ui, false);
+            comment_nav(app, ui, true);
+        });
         big(app, ui, Icon::DeleteComment, "Delete", "comment.delete", json!({}));
         let show = app.ui.pane.as_deref() == Some("comments");
         if big_button_ex(ui, Icon::ShowComments, "Show\nComments", true, false, show).0.clicked() {
@@ -1880,6 +2013,105 @@ fn view(app: &mut SlideApp, ui: &mut Ui) {
 
 // ---------- contextual tabs ----------
 
+/// Shape Format ▸ Text Effects ▸ Transform: No Transform, Follow Path, then the other presets.
+fn transform_gallery(app: &mut SlideApp, ui: &mut Ui) {
+    let current = selected_warp(app);
+    ui.label(egui::RichText::new("Transform").font(theme::bold(12.0)));
+    ui.label("Follow Path");
+    let mut picked = false;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
+        for p in deckcraft_geom::warp::CATALOG.iter().filter(|p| deckcraft_geom::warp::is_follow(p.id)) {
+            if warp_tile(ui, p.id, p.label, current.as_deref() == Some(p.id)) {
+                run(app, "format.textWarp", json!({"preset": p.id}));
+                picked = true;
+            }
+        }
+    });
+    ui.label("Warp");
+    egui::ScrollArea::vertical().max_height(220.0).id_salt("text_warp_gallery").show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
+            if warp_tile(ui, "", "No Transform", current.is_none()) {
+                run(app, "format.textWarp", json!({"preset": "none"}));
+                picked = true;
+            }
+            for p in deckcraft_geom::warp::CATALOG.iter().filter(|p| !deckcraft_geom::warp::is_follow(p.id)) {
+                if warp_tile(ui, p.id, p.label, current.as_deref() == Some(p.id)) {
+                    run(app, "format.textWarp", json!({"preset": p.id}));
+                    picked = true;
+                }
+            }
+        });
+    });
+    if picked {
+        ui.close();
+    }
+}
+
+fn selected_warp(app: &SlideApp) -> Option<String> {
+    let doc = app.session.active()?;
+    let id = doc.selection.text.as_ref().map(|t| t.shape).or_else(|| doc.selection.shapes.first().copied())?;
+    doc.shape(id)?.text.as_ref()?.body.warp.clone()
+}
+
+fn warp_tile(ui: &mut Ui, preset: &str, label: &str, selected: bool) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let (rect, resp) = ui.allocate_exact_size(vec2(34.0, 28.0), Sense::click());
+    if selected {
+        ui.painter().rect_filled(rect, CornerRadius::same(3), t.selected);
+    } else if resp.hovered() {
+        ui.painter().rect_filled(rect, CornerRadius::same(3), t.hover);
+    }
+    paint_warp_icon(ui.painter(), rect.shrink(4.0), (!preset.is_empty()).then_some(preset), t.text);
+    resp.on_hover_text(label).clicked()
+}
+
+/// The preset's guides, or two straight lines for No Transform.
+fn paint_warp_icon(p: &egui::Painter, r: Rect, name: Option<&str>, color: Color32) {
+    let Some(name) = name else {
+        let y0 = r.min.y + r.height() * 0.32;
+        let y1 = r.min.y + r.height() * 0.68;
+        p.line_segment([pos2(r.min.x, y0), pos2(r.max.x, y0)], Stroke::new(1.0, color));
+        p.line_segment([pos2(r.min.x, y1), pos2(r.max.x, y1)], Stroke::new(1.0, color));
+        return;
+    };
+    let rect = deckcraft_geom::Rect::new((r.min.x + 1.0) as f64, (r.min.y + 1.0) as f64, (r.max.x - 1.0) as f64, (r.max.y - 1.0) as f64);
+    let Some(w) = deckcraft_geom::warp::warp(name, &[], rect) else { return };
+    for band in &w.bands {
+        match band {
+            deckcraft_geom::warp::Band::Fill { top, bottom } => {
+                stroke_guide(p, top, color);
+                stroke_guide(p, bottom, color);
+            }
+            deckcraft_geom::warp::Band::Follow { path, .. } => stroke_guide(p, path, color),
+        }
+    }
+}
+
+fn stroke_guide(p: &egui::Painter, g: &deckcraft_geom::warp::Guide, color: Color32) {
+    let len = g.length();
+    if !(len.is_finite() && len > 1.0) {
+        return;
+    }
+    let n = 20i32;
+    let mut pts = Vec::with_capacity((n + 1) as usize);
+    for i in 0..=n {
+        let (q, _) = g.at(len * f64::from(i) / f64::from(n));
+        if q.x.is_finite() && q.y.is_finite() {
+            pts.push(pos2(q.x as f32, q.y as f32));
+        }
+    }
+    if pts.len() >= 2 {
+        p.add(egui::Shape::Path(egui::epaint::PathShape {
+            points: pts,
+            closed: false,
+            fill: Color32::TRANSPARENT,
+            stroke: Stroke::new(1.0, color).into(),
+        }));
+    }
+}
+
 fn shape_format(app: &mut SlideApp, ui: &mut Ui) {
     let sc = scheme(app);
     let sel = enabled(app, "shape.fill");
@@ -1896,6 +2128,11 @@ fn shape_format(app: &mut SlideApp, ui: &mut Ui) {
             ui.label("Change Shape");
             if let Some(p) = shapes_gallery(ui) {
                 run(app, "shape.change", json!({"preset": p}));
+            }
+            ui.separator();
+            if ui.add_enabled(enabled(app, "shape.editPoints"), egui::Button::new("Edit Points")).clicked() {
+                run(app, "shape.editPoints", json!({"on": true}));
+                ui.close();
             }
         });
         let can_merge = enabled(app, "shape.merge");
@@ -1949,6 +2186,10 @@ fn shape_format(app: &mut SlideApp, ui: &mut Ui) {
                     if let Some(Some(c)) = widgets::color_grid(ui, &sc, None) {
                         run(app, "format.color", json!({"color": cref_param(&c)}));
                     }
+                    if let Some(sh) = app.session.active().and_then(|d| d.selected_shapes().first().map(|s| (*s).clone())) {
+                        ui.separator();
+                        crate::panes::text_transparency_slider(app, ui, &sh);
+                    }
                 });
             }
             let (_, a) = small_button_ex(ui, Icon::TextOutline, "Text Outline", sel, false, true);
@@ -1960,10 +2201,13 @@ fn shape_format(app: &mut SlideApp, ui: &mut Ui) {
                 });
             }
             let r = small_button(ui, Icon::TextEffects, "Text Effects", sel, false);
-            egui::Popup::menu(&r).show(|ui| {
+            egui::Popup::menu(&r).width(312.0).show(|ui| {
                 if ui.button("Shadow").clicked() {
                     run(app, "format.textShadow", json!({}));
+                    ui.close();
                 }
+                ui.separator();
+                transform_gallery(app, ui);
             });
         });
     });
@@ -2050,13 +2294,22 @@ fn size_group(app: &mut SlideApp, ui: &mut Ui) {
                 }
             });
         });
+        if ui.add_enabled(bx.is_some(), egui::Button::new("Size and Position…")).clicked() {
+            run(app, "shape.sizePosition", json!({}));
+        }
     });
 }
 
 fn picture_format(app: &mut SlideApp, ui: &mut Ui) {
     group(ui, |ui| {
-        let r = big_button(ui, Icon::RemoveBackground, "Remove\nBackground", false);
-        let _ = r.on_hover_text("Remove Background (coming soon)");
+        let r = big_button(ui, Icon::RemoveBackground, "Remove\nBackground", enabled(app, "picture.removeBackground"));
+        egui::Popup::menu(&r).show(|ui| {
+            for (label, tol) in [("Remove Background", 20.0), ("Remove More (looser)", 35.0), ("Remove Less (tighter)", 10.0)] {
+                if ui.button(label).clicked() {
+                    run(app, "picture.removeBackground", json!({"tolerance": tol}));
+                }
+            }
+        });
         let r = big_button(ui, Icon::Corrections, "Corrections", true);
         egui::Popup::menu(&r).show(|ui| {
             for b in [-0.4, -0.2, 0.0, 0.2, 0.4] {
@@ -2425,4 +2678,38 @@ fn paint_freeform_icon(p: &egui::Painter, r: Rect, name: &str, ink: Color32) {
         _ => (0..=40).map(|i| i as f32 / 40.0).map(|u| at(u, 0.5 + 0.35 * (u * 19.0).sin() * (1.0 - u * 0.4))).collect(),
     };
     p.add(egui::Shape::line(pts, egui::Stroke::new(1.3, ink)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Paints one transition tile and one animation tile and returns the colour of every label.
+    fn tile_label_colours(dark: bool) -> Vec<Color32> {
+        let ctx = egui::Context::default();
+        ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
+        let r = Rect::from_min_size(pos2(0.0, 0.0), vec2(80.0, 60.0));
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            paint_transition_tile(ui.painter(), r, ("fade", "Fade"));
+            paint_anim_tile(ui.painter(), r, "Appear", AnimClass::Entrance, true);
+        });
+        out.textures_delta.clear();
+        out.shapes
+            .iter()
+            .flat_map(|c| match &c.shape {
+                egui::Shape::Text(s) => s.galley.job.sections.iter().map(|x| x.format.color).collect(),
+                _ => Vec::new(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn ribbon_tile_labels_follow_the_theme() {
+        // #159: the transition and animation tiles were always painted with the light palette,
+        // so their labels were dark grey on the dark ribbon.
+        let dark = tile_label_colours(true);
+        assert_eq!(dark, vec![Tokens::dark().text; 2]);
+        let light = tile_label_colours(false);
+        assert_eq!(light, vec![Tokens::light().text; 2]);
+    }
 }

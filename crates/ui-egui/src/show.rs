@@ -251,7 +251,7 @@ fn part_textures(ctx: &egui::Context, doc: &Presentation, from: Option<usize>, t
 
 /// Read the current viewport's show keys before its widgets can consume them. Both the
 /// audience window and Presenter View use this path, including animation steps and end-of-show.
-fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64) -> bool {
+fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64, keymap: &crate::keymap::Keymap) -> bool {
     let keys: Vec<(egui::Key, egui::Modifiers)> = ctx.input(|i| {
         i.events
             .iter()
@@ -263,7 +263,7 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64) 
     for (k, m) in keys {
         use egui::Key::*;
         // Custom slide-show keys (File › Settings › Keyboard Shortcuts) map onto the built-in ones.
-        let Some((k, m)) = app.ui.keymap.show_key(k, m) else { continue };
+        let Some((k, m)) = keymap.show_key(k, m) else { continue };
         match k {
             Escape | Minus => keep = false,
             ArrowRight | ArrowDown | Space | PageDown | N => {
@@ -331,7 +331,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         }
         show.after_enter(&doc, now);
     }
-    let mut keep = keyboard(&ctx, &mut show, &doc, now);
+    let mut keep = keyboard(&ctx, &mut show, &doc, now, &app.ui.keymap);
     let (clicked, secondary, moved) = ctx.input(|i| (i.pointer.primary_clicked(), i.pointer.secondary_clicked(), i.pointer.delta().length() > 0.0));
     if moved {
         show.last_move = now;
@@ -699,7 +699,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     }
     // Presenter view in a second window.
     if keep && show.presenter && !show.reading {
-        presenter_window(&ctx, &mut show, &doc, now, &mut keep);
+        presenter_window(&ctx, &mut show, &doc, now, &mut keep, &app.ui.keymap);
     }
     if keep {
         app.show = Some(show);
@@ -911,7 +911,7 @@ impl Show {
     }
 }
 
-fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64, keep: &mut bool) {
+fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64, keep: &mut bool, keymap: &crate::keymap::Keymap) {
     let cur = show.state.slide;
     let next = deckcraft_anim::show_order(doc).into_iter().find(|i| *i > cur);
     let cur_tex = show.tex.as_ref().map(|(_, t)| t.clone());
@@ -937,7 +937,7 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
         egui::ViewportId::from_hash_of("deckcraft_presenter"),
         egui::ViewportBuilder::default().with_title("Presenter View — DeckCraft").with_inner_size([1100.0, 700.0]),
         |ui, _| {
-            if !keyboard(ui.ctx(), show, doc, now) {
+            if !keyboard(ui.ctx(), show, doc, now, keymap) {
                 *keep = false;
             }
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::from_gray(24)).inner_margin(egui::Margin::same(16))).show(ui, |ui| {
@@ -1026,7 +1026,7 @@ mod tests {
         let mut harness = egui_kittest::Harness::builder().with_size(vec2(1100.0, 700.0)).build_ui_state(
             |ui, (doc, show, keep): &mut (std::sync::Arc<Presentation>, Show, bool)| {
                 let now = ui.input(|i| i.time);
-                presenter_window(ui.ctx(), show, doc, now, keep);
+                presenter_window(ui.ctx(), show, doc, now, keep, &crate::keymap::Keymap::default());
             },
             (doc, show, true),
         );

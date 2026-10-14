@@ -980,6 +980,8 @@ fn the_default_shape_is_kept_in_the_prefs() {
     let st = next.doc().unwrap();
     let fill = st.selected_shapes().first().and_then(|sh| sh.fill.clone());
     assert_eq!(fill, s.prefs.default_shape.as_ref().and_then(|d| d.fill.clone()), "a new shape in the next session has the look");
+}
+
 #[test]
 fn cell_fill_walks_only_the_cells_a_huge_selection_covers() {
     // A selection may reach far past the table; filling it touches the real cells and nothing more.

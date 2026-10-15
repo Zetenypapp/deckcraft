@@ -1,43 +1,6 @@
 # UI parity with PowerPoint
 
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (File › Settings: General, New Presentations, search, backup, cheat sheet; custom keyboard shortcuts and Reset all settings; File › Settings with Themes, Keyboard Shortcuts and Reset tabs; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** trivial (Eyedropper in the colour menus (#367); previously minor: File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (Export button in the title bar; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (right click selects the shape under the pointer; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (WordArt Transform gallery; previous: File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Insert › Icons is a Lucide stroke gallery; ribbon icons stay original drawings; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Size and Position dialog; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Comments pane lists every slide; Review Previous/Next; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (View › New Window opens a second window on the same presentation; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Photo Album dialog; 28 dialogs; breadth stays 79%, UI ~60%; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Edit Photo Album reuses the Photo Album dialog; 28 dialogs; breadth stays 79%, UI ~60%; previous: trivial, Photo Album dialog) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Colors; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Fonts; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Alt Text dialog's decorative checkbox follows the selection; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Hyperlink dialog follows the selection; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Insert › Date and Time dialog; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Zoom dialog: percent or Fit, applies on OK; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** trivial (command search skips Export without a path, #79; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; dialogs stay 27) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers placeholders; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Trim Media dialog follows the selection; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-14 · **Change:** minor (copy and paste rich text and pictures with other apps; previous: text editing keys, #268, and File tab, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (animation preview on the editor canvas; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Format Shape fill transparency follows the selection; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (Grid Options dialog; previous: File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (WordArt adjust handles; previous: File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-
-> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-14 · **Change:** minor (File › New starter decks; previous: minor, text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Sorter sections: add, rename, collapse, drag a whole section; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Colors; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Fonts; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Insert › Date and Time dialog; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; dialogs stay 27) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers placeholders; previous: text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Format Background picture and solid options; dialogs stay 27) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-14 · **Change:** minor (copy and paste rich text and pictures with other apps; previous: text editing keys, #268, and File tab, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Font dialog; previous: minor, text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Paragraph dialog; previous: minor, Font dialog) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** major (community PR wave 2026-10-14: 14 new dialogs (41 in all), Eyedropper, Export button, New Window, Grid Options, WordArt gallery and handles, Slide Sorter sections, Quick Access Toolbar, Format Background and Format Shape depth, rich-text clipboard; duplicated rows and headers folded; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft looks and feels next to PowerPoint: the shell, the ribbon, menus, panes, dialogs,
@@ -213,11 +176,11 @@ consistency is open (#73, #56).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | Gray list markers on empty paragraphs while editing; caret keeps the list indent before typing |
+| 2026-10-14 | minor | Community PR wave folded: one row each for Format Shape, Dialogs (41, listed from `dialogs.rs`), Animation Pane (timeline is in), window, Quick Access Toolbar, Format Background, rulers, image paste, context menus, exact size and edit points; estimates re-totalled (~26–46 h) |
 | 2026-10-13 | minor | Settings page, interface size, reduce motion, startup, new-presentation defaults, settings backup and shortcut cheat sheet rows |
 | 2026-10-13 | minor | Custom keyboard shortcuts and Reset all settings rows |
 | 2026-10-13 | minor | Interface themes on File › Account, and the title bar's gear that opens it |
-| 2026-10-14 | minor | Gray list markers on empty paragraphs while editing; caret keeps the list indent before typing |
-| 2026-10-14 | minor | Community PR wave folded: one row each for Format Shape, Dialogs (41, listed from `dialogs.rs`), Animation Pane (timeline is in), window, Quick Access Toolbar, Format Background, rulers, image paste, context menus, exact size and edit points; estimates re-totalled (~26–46 h) |
 | 2026-10-13 | trivial | Eyedropper in the colour menus (#367) |
 | 2026-10-12 | minor | Title bar: an Export button next to Save opens the Export dialog, a quick-access shortcut beside File › Export |
 | 2026-10-12 | minor | A right click selects the shape under the pointer before its context menu opens, as in PowerPoint; edited text keeps its selection and gets text items |

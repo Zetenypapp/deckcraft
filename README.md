@@ -97,6 +97,9 @@ Today it can:
 
 ## Getting started
 
+PDF export uses the shared `craft-pdf` writer with import features disabled. See
+[`crates/pdf/README.md`](crates/pdf/README.md) for the dependency and validation requirements.
+
 ```sh
 git clone https://github.com/storytold/deckcraft
 cd deckcraft
@@ -155,7 +158,7 @@ deckcraft-cli mcp --automation-read-root DIR --automation-write-root DIR   # con
 
 ## Roadmap
 
-DeckCraft is in **alpha**. It covers **80% of PowerPoint's features by breadth** (92% of the core
+DeckCraft is in **alpha**. It covers **84% of PowerPoint's features by breadth** (92% of the core
 ones, measured) and is about **55% of the way to replacing PowerPoint for real work** (estimated).
 See [ROADMAP.md](ROADMAP.md) for the stage, numbers by dimension and what's next,
 [docs/target-app-parity.md](docs/target-app-parity.md) for the full assessment,

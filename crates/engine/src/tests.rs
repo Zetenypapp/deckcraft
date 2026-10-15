@@ -105,13 +105,45 @@ fn editing_text_refits_a_saved_shrink() {
     s.edit(|doc, sel| {
         let shapes = crate::shapes_mut(doc, sel).unwrap();
         let sh = deckcraft_model::find_shape_mut(shapes, title).unwrap();
-        sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: 0.5, line_reduction: 0.2 });
+        sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: Some(0.5), line_reduction: 0.2 });
         Ok(())
     })
     .unwrap();
     s.execute("text.insert", &json!({"text": "!"})).unwrap();
     let sh = s.doc().unwrap().shape(title).cloned().unwrap();
-    assert_eq!(sh.text.unwrap().body.autofit, Some(AutoFit::Shrink { font_scale: 1.0, line_reduction: 0.0 }));
+    assert_eq!(sh.text.unwrap().body.autofit, Some(AutoFit::Shrink { font_scale: Some(1.0), line_reduction: 0.0 }));
+}
+
+/// After an edit, the shrink-on-overflow scale the layout computes is stored, so the saved file
+/// carries the scale DeckCraft draws instead of a bare normAutofit (#724).
+#[test]
+fn editing_shrink_text_stores_the_layout_scale() {
+    use deckcraft_model::text::AutoFit;
+    let mut s = session();
+    let r = s.execute("shape.insert", &json!({"preset": "rect", "rect": [80.0, 80.0, 200.0, 40.0]})).unwrap();
+    let id = deckcraft_model::ShapeId(r["id"].as_u64().unwrap() as u32);
+    s.execute("format.autofit", &json!({"mode": "shrink"})).unwrap();
+    let text = (0..12).map(|i| format!("Line {i}")).collect::<Vec<_>>().join("\n");
+    s.execute("text.set", &json!({"id": id.0, "text": text})).unwrap();
+    let sh = s.doc().unwrap().shape(id).cloned().unwrap();
+    let Some(AutoFit::Shrink { font_scale, line_reduction }) = sh.text.unwrap().body.autofit else { panic!("shrink") };
+    assert!(font_scale.is_some_and(|s| s < 1.0), "the computed fit is stored: {font_scale:?} / {line_reduction}");
+    // The saved file must carry the scale DeckCraft draws, so PowerPoint opens it the same way.
+    let bytes = deckcraft_pptx::export(&s.doc().unwrap().doc).unwrap();
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut xml = String::new();
+    std::io::Read::read_to_string(&mut z.by_name("ppt/slides/slide1.xml").unwrap(), &mut xml).unwrap();
+    let scales: Vec<i64> = xml.split("fontScale=\"").skip(1).filter_map(|s| s.split('"').next()?.parse().ok()).collect();
+    assert!(scales.iter().any(|v| *v < 100_000), "the fitted scale is saved: {scales:?}");
+    // Undo restores the state before the edit, and redo brings the stored fit back.
+    s.execute("edit.undo", &json!({})).unwrap();
+    let sh = s.doc().unwrap().shape(id).cloned().unwrap();
+    let Some(AutoFit::Shrink { font_scale, .. }) = sh.text.unwrap().body.autofit else { panic!("shrink") };
+    assert_eq!(font_scale, Some(1.0), "undo restores the scale the edit started from");
+    s.execute("edit.redo", &json!({})).unwrap();
+    let sh = s.doc().unwrap().shape(id).cloned().unwrap();
+    let Some(AutoFit::Shrink { font_scale, .. }) = sh.text.unwrap().body.autofit else { panic!("shrink") };
+    assert!(font_scale.is_some_and(|v| v < 1.0), "redo brings the stored fit back: {font_scale:?}");
 }
 
 #[test]
@@ -1069,7 +1101,9 @@ fn an_embedded_face_is_used_when_the_machine_lacks_it() {
     let mut body = deckcraft_model::text::TextBody::from_text("Hello");
     body.paragraphs[0].runs[0].props.font = Some("DeckCraft Colr Squares".into());
     slide.shapes[0].text = Some(body);
-    let id = p.add_media("font1.fntdata", "application/x-fontdata", include_bytes!("../../render/tests/fixtures/colr-squares.ttf").to_vec());
+    let id = p
+        .add_media("font1.fntdata", "application/x-fontdata", include_bytes!("../../render/tests/fixtures/colr-squares.ttf").to_vec())
+        .expect("media");
     p.embedded_fonts.push(deckcraft_model::EmbeddedFont { typeface: "DeckCraft Colr Squares".into(), regular: Some(id), ..Default::default() });
     let data = crate::cmd::base64_encode(&crate::cmd::file::save_bytes(&p, "pptx").unwrap());
     let mut s = Session::with_new();
@@ -1467,6 +1501,39 @@ fn the_default_shape_is_kept_in_the_prefs() {
     let st = next.doc().unwrap();
     let fill = st.selected_shapes().first().and_then(|sh| sh.fill.clone());
     assert_eq!(fill, s.prefs.default_shape.as_ref().and_then(|d| d.fill.clone()), "a new shape in the next session has the look");
+/// #725: a layout with a small body placeholder ahead of its content placeholder (as Keynote
+/// exports "Title & Bullets") still gets the body in the content placeholder (`idx="1"`).
+#[test]
+fn new_slide_body_goes_to_the_content_placeholder() {
+    for before in [true, false] {
+        let mut s = session();
+        let doc = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().doc);
+        let id = deckcraft_model::ShapeId(doc.alloc_id().expect("id"));
+        let lay = std::sync::Arc::make_mut(&mut doc.masters[0])
+            .layouts
+            .iter_mut()
+            .find(|l| l.kind == deckcraft_model::LayoutType::TitleAndContent)
+            .unwrap();
+        let at = lay.shapes.iter().position(|x| x.ph.as_ref().is_some_and(|p| p.idx == 1)).unwrap();
+        let mut small = lay.shapes[at].clone();
+        small.id = id;
+        small.name = "Subtitle 21".into();
+        let ph = small.ph.as_mut().unwrap();
+        ph.kind = deckcraft_model::PhType::Body;
+        ph.idx = 21;
+        ph.size = Some("quarter".into());
+        lay.shapes.insert(if before { at } else { at + 1 }, small);
+
+        s.execute("slide.new", &json!({"layout": "titleAndContent", "title": "T", "body": "Line one\nLine two"})).unwrap();
+        let doc = &s.doc().unwrap().doc;
+        let slide = &doc.slides[doc.slides.len() - 1];
+        let text = |idx: u32| {
+            let sh = slide.shapes.iter().find(|x| x.ph.as_ref().is_some_and(|p| p.idx == idx)).unwrap();
+            sh.text.as_ref().map(|t| t.text()).unwrap_or_default()
+        };
+        assert_eq!(text(1), "Line one\nLine two", "before = {before}");
+        assert_eq!(text(21), "", "before = {before}");
+    }
 }
 
 #[test]
@@ -1629,8 +1696,8 @@ mod copy_remap {
     fn populate(s: &mut Session, bytes: &[u8]) -> (ShapeId, ShapeId, ShapeId) {
         let st = s.doc_mut().unwrap();
         let doc = Arc::make_mut(&mut st.doc);
-        let media = doc.add_media("p.png", "image/png", bytes.to_vec());
-        let (p, b, c) = (ShapeId(doc.alloc_id()), ShapeId(doc.alloc_id()), ShapeId(doc.alloc_id()));
+        let media = doc.add_media("p.png", "image/png", bytes.to_vec()).expect("media");
+        let (p, b, c) = (ShapeId(doc.alloc_id().expect("id")), ShapeId(doc.alloc_id().expect("id")), ShapeId(doc.alloc_id().expect("id")));
         let x = Some(Xfrm::new(10.0, 10.0, 50.0, 50.0));
         let slide = Arc::make_mut(&mut doc.slides[0]);
         slide.shapes.push(Shape {
@@ -3417,4 +3484,120 @@ fn ink_pressures(s: &Session) -> Vec<Vec<f32>> {
     };
     let deckcraft_model::ShapeKind::Ink { strokes } = &sh.kind else { return vec![] };
     strokes.iter().map(|stroke| stroke.points.iter().map(|p| p.2).collect()).collect()
+}
+
+#[test]
+fn shape_three_d_format_and_rotation_round_trip() {
+    use crate::cmd::three_d::Shape3d;
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100]})).unwrap();
+    let fx = |s: &Session| s.doc().unwrap().selected_shapes()[0].effects.clone().unwrap_or_default();
+    // The old `bevel` key now writes real 3-D XML, so it is drawn and saved.
+    s.execute("shape.effects", &json!({"bevel": "angle"})).unwrap();
+    let e = fx(&s);
+    assert_eq!(e.bevel.as_deref(), Some("angle"));
+    assert!(e.raw3d.as_deref().is_some_and(|r| r.contains("bevelT") && r.contains("prst=\"angle\"")));
+    s.execute(
+        "shape.effects",
+        &json!({"threeD": {"bevelTopW": 9, "bevelBottom": "circle", "depth": 20, "contour": 2, "material": "metal",
+            "lighting": "harsh", "camera": "isometricTopUp", "rotX": 30, "rotY": -20, "z": 5, "bogus": 1}}),
+    )
+    .unwrap();
+    // Unknown names and non-finite numbers are ignored.
+    s.execute("shape.effects", &json!({"threeD": {"material": "gold", "depth": f64::NAN, "camera": 7}})).unwrap();
+    let want = fx(&s).raw3d.map(|r| Shape3d::parse(&r)).unwrap();
+    assert_eq!(want.top.as_ref().map(|b| (b.preset.as_str(), b.w, b.h)), Some(("angle", 9.0, 6.0)));
+    assert_eq!(want.bottom.as_ref().map(|b| b.preset.as_str()), Some("circle"));
+    assert_eq!((want.depth, want.contour, want.z), (20.0, 2.0, 5.0));
+    assert_eq!((want.material.as_str(), want.light.as_str(), want.camera.as_str()), ("metal", "harsh", "isometricTopUp"));
+    assert_eq!(want.rot, Some((30.0, 340.0, 0.0)));
+    // PPTX save and reopen keeps every setting.
+    let bytes = cmd::file::save_bytes(&s.doc().unwrap().doc, "pptx").unwrap();
+    s.execute("file.openBytes", &json!({"name": "d.pptx", "data": cmd::base64_encode(&bytes)})).unwrap();
+    let back = s.doc().unwrap().doc.slides.iter().flat_map(|sl| sl.shapes.iter()).find_map(|sh| sh.effects.as_ref()?.raw3d.clone());
+    assert_eq!(Shape3d::parse(&back.unwrap()), want);
+}
+
+#[test]
+fn three_d_reset_and_flat_shapes_drop_the_xml() {
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100]})).unwrap();
+    let fx = |s: &Session| s.doc().unwrap().selected_shapes()[0].effects.clone().unwrap_or_default();
+    s.execute("shape.effects", &json!({"threeD": {"rotZ": 15, "depth": 4}})).unwrap();
+    assert!(fx(&s).raw3d.is_some());
+    s.execute("shape.effects", &json!({"threeD": {"reset": true}})).unwrap();
+    assert_eq!((fx(&s).raw3d, fx(&s).bevel), (None, None));
+    // Keeps colours it doesn't model.
+    let raw = "<a:scene3d><a:camera prst=\"orthographicFront\"/><a:lightRig rig=\"threePt\" dir=\"t\"/></a:scene3d><a:sp3d extrusionH=\"12700\"><a:extrusionClr><a:srgbClr val=\"FF0000\"/></a:extrusionClr></a:sp3d>";
+    let mut s3 = cmd::three_d::Shape3d::parse(raw);
+    s3.apply(&json!({"depth": 3}));
+    assert!(s3.to_xml().unwrap().contains("<a:extrusionClr><a:srgbClr val=\"FF0000\"/></a:extrusionClr>"));
+}
+
+/// A presentation read off the UI thread enters the session through `file.adopt`: journaled like
+/// `file.open`, and replayable from the journal without the staged copy.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn background_loads_are_adopted_through_a_command() {
+    let mut src = Session::with_new();
+    src.execute("slide.new", &json!({})).unwrap();
+    let path = std::env::temp_dir().join(format!("deckcraft-adopt-{}.deckcraft", std::process::id()));
+    let path = path.to_string_lossy().to_string();
+    src.execute("file.saveAs", &json!({"path": path})).unwrap();
+
+    let mut s = Session::new();
+    let loaded = cmd::file::read_presentation_file(&path).unwrap();
+    let token = s.stage_loaded(loaded);
+    let r = s.execute("file.adopt", &json!({"path": path, "token": token})).unwrap();
+    assert_eq!(r["slides"], 2, "{r}");
+    assert_eq!(s.documents().len(), 1);
+    assert_eq!(s.doc().unwrap().path.as_deref(), Some(path.as_str()));
+    let (id, params) = s.journal.last().cloned().unwrap();
+    assert_eq!(id, "file.adopt");
+    // The token was used up; replaying the entry reads the file again.
+    let mut replay = Session::new();
+    replay.execute(&id, &params).unwrap();
+    assert_eq!(replay.doc().unwrap().doc.slides.len(), 2);
+    // A token staged for another path is not taken for this one.
+    let other = s.stage_loaded(cmd::file::LoadedFile { path: "/elsewhere.pptx".into(), doc: Default::default(), native: true, damaged: vec![] });
+    s.execute("file.adopt", &json!({"path": path, "token": other})).unwrap();
+    assert_eq!(s.doc().unwrap().doc.slides.len(), 2);
+    assert!(s.execute("file.adopt", &json!({})).is_err());
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn every_command_id_is_registered_once() {
+    let mut seen = std::collections::HashSet::new();
+    let dups: Vec<&str> = crate::command_specs().iter().map(|c| c.id).filter(|id| !seen.insert(*id)).collect();
+    assert!(dups.is_empty(), "registered more than once: {dups:?}");
+}
+
+/// A deck whose ids are used up (a hostile file can arrive with next_id at the top of the
+/// range) refuses to grow instead of handing out duplicate ids (#407).
+#[test]
+fn an_exhausted_id_space_refuses_growth() {
+    let mut s = session();
+    s.execute("slide.new", &json!({})).unwrap();
+    std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().doc).next_id = u32::MAX;
+    let before = s.doc().unwrap().doc.clone();
+    assert!(s.execute("slide.new", &json!({})).is_err(), "a new slide is refused");
+    assert!(s.execute("shape.insert", &json!({"preset": "rect", "rect": [10, 10, 100, 50]})).is_err());
+    assert!(s.execute("slide.duplicate", &json!({})).is_err());
+    assert!(s.execute("edit.duplicate", &json!({})).is_err());
+    assert!(s.execute("insert.smartArt", &json!({"kind": "blockList", "items": ["Plan", "Build"]})).is_err());
+    assert!(s.execute("insert.textBox", &json!({"text": "Hi"})).is_err());
+    // What the deck holds is untouched: same slides, same ids, no duplicates.
+    let after = s.doc().unwrap().doc.clone();
+    assert_eq!(after.slides.len(), before.slides.len());
+    let mut ids = vec![];
+    deckcraft_model::walk(&after.slides[0].shapes, &mut |sh, _| ids.push(sh.id.0));
+    ids.push(after.slides[0].id.0);
+    ids.push(after.next_id);
+    let mut sorted = ids.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), ids.len(), "no id repeats");
 }

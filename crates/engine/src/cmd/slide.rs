@@ -115,14 +115,14 @@ fn new(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
         };
-        let mut slide = defaults::new_slide(doc, layout);
+        let mut slide = defaults::new_slide(doc, layout).ok_or_else(|| bad("slide.new", NO_ID_SPACE))?;
         if let Some(t) = str_param(p, "title")
             && let Some(sh) = slide.shapes.iter_mut().find(|x| x.ph_type().is_some_and(|k| k.is_title()))
         {
             sh.text = Some(TextBody::from_text(t));
         }
         if let Some(b) = str_param(p, "body")
-            && let Some(sh) = slide.shapes.iter_mut().find(|x| x.ph_type().is_some_and(|k| !k.is_title()))
+            && let Some(sh) = body_placeholder(&mut slide.shapes)
         {
             let mut body = TextBody::from_text(b);
             // Leading tabs set the outline level, as in text.set.
@@ -158,6 +158,25 @@ fn new(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 
+/// The placeholder a new slide's `body` goes into: the layout's main content placeholder.
+/// Prefers `idx="1"` (the content slot PowerPoint fills), then a full-size text placeholder over
+/// a `half`/`quarter` one, then a text placeholder over a picture/chart/table one; ties keep
+/// shape order, so a layout with a single body placeholder behaves as before.
+fn body_placeholder(shapes: &mut [deckcraft_model::Shape]) -> Option<&mut deckcraft_model::Shape> {
+    use deckcraft_model::PhType;
+    let rank = |sh: &deckcraft_model::Shape| {
+        let ph = sh.ph.as_ref()?;
+        if ph.kind.is_title() {
+            return None;
+        }
+        let text = matches!(ph.kind, PhType::Body | PhType::Obj | PhType::SubTitle);
+        let small = matches!(ph.size.as_deref(), Some("half" | "quarter"));
+        Some((ph.idx != 1, small, !text))
+    };
+    let best = shapes.iter().enumerate().filter_map(|(i, sh)| rank(sh).map(|r| (r, i))).min()?.1;
+    shapes.get_mut(best)
+}
+
 fn index_of(s: &Session, p: &Value) -> Result<usize> {
     let st = s.doc()?;
     let i = usize_param(p, "index").unwrap_or(st.selection.slide);
@@ -186,9 +205,9 @@ fn duplicate(s: &mut Session, p: &Value) -> Result<Value> {
         for (k, i) in indices.iter().enumerate() {
             let Some(src) = doc.slides.get(*i).map(|x| x.as_ref().clone()) else { continue };
             let mut copy = src;
-            copy.id = SlideId(doc.alloc_id());
+            copy.id = SlideId(doc.alloc_id().ok_or_else(|| bad("slide.duplicate", NO_ID_SPACE))?);
             // Animations follow the new shape ids, triggers included.
-            let map = super::edit::reid(doc, &mut copy.shapes);
+            let map = super::edit::reid("slide.duplicate", doc, &mut copy.shapes)?;
             super::edit::remap_animations(&mut copy.animations, &map);
             let section = doc.section_of(src_id(doc, *i));
             let at = (last + 1 + k).min(doc.slides.len());
@@ -377,7 +396,7 @@ pub fn apply_layout(doc: &mut Presentation, index: usize, layout: LayoutId) -> R
         doc.layout(layout).map(|(_, l)| l.shapes.clone()).ok_or_else(|| bad("slide.layout", "no such layout"))?;
     let mut fresh = vec![];
     for ls in lay_shapes.iter().filter(|x| x.ph.as_ref().is_some_and(|p| !p.kind.is_footer_kind())) {
-        let id = deckcraft_model::ShapeId(doc.alloc_id());
+        let id = deckcraft_model::ShapeId(doc.alloc_id().ok_or_else(|| bad("slide.layout", NO_ID_SPACE))?);
         fresh.push((id, ls.clone()));
     }
     let slide = doc.slides.get_mut(index).ok_or_else(|| bad("slide.layout", "no slide"))?;

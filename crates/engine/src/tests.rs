@@ -1501,6 +1501,8 @@ fn the_default_shape_is_kept_in_the_prefs() {
     let st = next.doc().unwrap();
     let fill = st.selected_shapes().first().and_then(|sh| sh.fill.clone());
     assert_eq!(fill, s.prefs.default_shape.as_ref().and_then(|d| d.fill.clone()), "a new shape in the next session has the look");
+}
+
 /// #725: a layout with a small body placeholder ahead of its content placeholder (as Keynote
 /// exports "Title & Bullets") still gets the body in the content placeholder (`idx="1"`).
 #[test]

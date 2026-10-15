@@ -1,58 +1,38 @@
 # PowerPoint feature checklist
 
-> **Generated:** 2026-10-13 (summary by `cargo xtask parity`; Preview in editor re-scored; earlier rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4; video/animated GIF row re-scored 2026-10-11, #171) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Generated:** 2026-10-14 (bullets/numbering remain D after empty-line marker review; summary by `cargo xtask parity`; rows re-scored by the 2026-10-14 community PR wave, duplicate Thesaurus, AutoCorrect, Artistic effects and Corrections rows folded; Preview in editor re-scored 2026-10-13; earlier rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4; video/animated GIF row re-scored 2026-10-11, #171) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
-**Weighted breadth parity: 82%** over 193 features.
+**Weighted breadth parity: 84%** over 191 features.
 
 | Priority | Features | Done | Partial | Missing | Parity |
 |---|---|---|---|---|---|
 | P0 | 72 | 61 | 11 | 0 | 92% |
-| P1 | 65 | 39 | 20 | 6 | 75% |
-| P2 | 54 | 13 | 15 | 26 | 38% |
-| P1 | 65 | 38 | 21 | 6 | 75% |
-| P2 | 54 | 13 | 16 | 25 | 39% |
-| P1 | 65 | 38 | 21 | 6 | 75% |
-| P2 | 54 | 14 | 15 | 25 | 40% |
-| P1 | 65 | 39 | 21 | 5 | 76% |
-| P2 | 54 | 14 | 17 | 23 | 42% |
-| P1 | 65 | 38 | 21 | 6 | 75% |
-| P2 | 54 | 13 | 16 | 25 | 39% |
-| P1 | 66 | 43 | 18 | 5 | 79% |
-| P2 | 55 | 16 | 20 | 19 | 47% |
+| P1 | 65 | 45 | 16 | 4 | 82% |
+| P2 | 54 | 17 | 25 | 12 | 55% |
 
 | Area | Parity |
 |---|---|
 | Application shell | 81% |
-| Files | 71% |
-| Slides | 90% |
+| Files | 75% |
+| Slides | 92% |
 | Views | 98% |
-| Masters & themes | 88% |
-| Views | 90% |
-| Masters & themes | 88% |
-| Shapes | 88% |
+| Masters & themes | 92% |
 | Shapes | 91% |
 | Format | 83% |
 | Arrange | 100% |
-| Text | 82% |
-| Tables | 95% |
-| Tables | 92% |
+| Text | 83% |
+| Tables | 97% |
 | Charts | 65% |
 | SmartArt | 50% |
-| Pictures | 52% |
+| Pictures | 60% |
 | Media | 67% |
 | Transitions | 100% |
-| Animations | 79% |
-| Slide show | 68% |
-| Transitions | 92% |
 | Animations | 85% |
-| Slide show | 66% |
-| Review | 60% |
+| Slide show | 68% |
 | Review | 70% |
-| Draw | 33% |
-| Undo & clipboard | 100% |
 | Draw | 50% |
-| Undo & clipboard | 88% |
+| Undo & clipboard | 100% |
 | Automation (✱) | 100% |
 | Platforms (✱) | 67% |
 
@@ -88,7 +68,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Files | Export video (MP4) / animated GIF (GIF: one frame per slide, no transitions; no video) | P2 | P |
 | Files | Print (slides, handouts, notes, outline) | P1 | M |
 | Files | Password protection | P2 | M |
-| Files | Reuse slides from another file | P1 | M |
+| Files | Reuse slides from another file | P1 | P |
 | Files | Drag and drop files onto the window | P1 | D |
 | Files | OpenDocument .odp open/save | P2 | M |
 | Slides | New slide by layout | P0 | D |
@@ -99,7 +79,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Slides | Reset slide | P1 | D |
 | Slides | Slides from outline | P2 | D |
 | Slides | Copy/paste slides between decks | P1 | P |
-| Slides | Zoom (summary, section and slide zoom) | P2 | M |
+| Slides | Zoom (summary, section and slide zoom) | P2 | P |
 | Views | Normal view (thumbnails, slide, notes) | P0 | D |
 | Views | Outline view | P1 | D |
 | Views | Slide Sorter | P0 | D |
@@ -165,7 +145,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Text | Change case, grow/shrink font, clear formatting | P1 | D |
 | Text | Text outline and text effects | P2 | P |
 | Text | Paragraph alignment, indents, spacing, line spacing | P0 | D |
-| Text | Bullets and numbering | P0 | D |
+| Text | Bullets and numbering (including gray empty-line markers while editing) | P0 | D |
 | Text | Picture bullets, custom bullet symbols | P2 | P |
 | Text | List levels (Tab / Shift+Tab) | P0 | D |
 | Text | Tab stops | P2 | D |
@@ -175,10 +155,8 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Text | Text direction (rotated, stacked) | P1 | D |
 | Text | Find and replace, replace fonts | P1 | P |
 | Text | Spelling check | P1 | P |
-| Text | Thesaurus | P2 | M |
-| Text | AutoCorrect and smart quotes | P2 | Y |
+| Text | AutoCorrect and smart quotes | P2 | P |
 | Text | Thesaurus | P2 | P |
-| Text | AutoCorrect and smart quotes | P2 | M |
 | Text | Symbols and emoji | P1 | D |
 | Text | Equations | P2 | M |
 | Text | Hyperlinks (URL, slide, email) | P1 | D |
@@ -204,13 +182,11 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Pictures | SVG pictures | P1 | M |
 | Pictures | Crop (and crop to shape, aspect ratio) | P0 | P |
 | Pictures | Corrections, colour, transparency (recolor and Set Transparent Color done; sharpen/soften and colour temperature pending) | P1 | P |
-| Pictures | Artistic effects | P2 | M |
-| Pictures | Corrections, colour, transparency | P1 | P |
 | Pictures | Artistic effects | P2 | P |
 | Pictures | Remove background | P2 | M |
 | Pictures | Picture styles and borders | P1 | D |
 | Pictures | Change / reset picture | P1 | D |
-| Pictures | Compress pictures | P2 | M |
+| Pictures | Compress pictures | P2 | D |
 | Pictures | Paste image from clipboard (fails on Windows and Linux, #53) | P0 | P |
 | Pictures | Insert screenshot | P2 | M |
 | Media | Insert audio (any common format) | P0 | D |
@@ -252,7 +228,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Undo & clipboard | Unlimited undo/redo | P0 | D |
 | Undo & clipboard | Cut, copy, paste shapes and slides | P0 | D |
 | Undo & clipboard | Paste special (keep formatting, picture, text only) | P1 | D |
-| Automation (✱) | Every command scriptable (CLI, control channel, MCP) | P0 | D |
+| Automation (✱) | Every command scriptable (CLI, control channel, MCP; remote reply IDs, envelopes and framing validated, #718) | P0 | D |
 | Automation (✱) | Headless rendering and conversion | P0 | D |
 | Platforms (✱) | macOS, Windows, Linux builds | P0 | P |
 | Platforms (✱) | Web (WASM) build | P1 | D |

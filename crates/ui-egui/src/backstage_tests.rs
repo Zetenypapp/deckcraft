@@ -302,6 +302,32 @@ fn save_as_and_export_run_the_file_commands() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Export › Change File Type › PNG offers "Transparent background" (#784): the PNG it saves
+/// leaves the slide background out. Other types don't show the option.
+#[test]
+fn change_file_type_png_can_leave_the_background_transparent() {
+    let dir = temp_dir("png-clear");
+    let (services, _) = saving_into(&dir);
+    let mut h = harness(SlideApp::new(Session::with_new(), services));
+    h.state_mut().run("app.backstage", json!({"page": "export"})).unwrap();
+    h.run_steps(3);
+    click_on_page(&h, "Change File Type");
+    h.run_steps(3);
+    assert!(h.query_by_label("Transparent background").is_none(), "only PNG has the option");
+    click_on_page(&h, "PNG Picture (*.png)");
+    h.run_steps(2);
+    h.get_by_label("Transparent background").click();
+    h.run_steps(2);
+    assert!(h.state().backstage.as_ref().is_some_and(|b| b.png_transparent));
+    click_on_page(&h, "Save As");
+    h.run_steps(3);
+    let title = h.state().session.active().unwrap().title();
+    let png = std::fs::read(dir.join(format!("{title}.png"))).unwrap();
+    let img = deckcraft_render::decode_image(&png).unwrap();
+    assert_eq!(img.get_pixel(2, 2).0[3], 0, "the background is left out");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Close closes a saved presentation at once and asks about unsaved changes first.
 #[test]
 fn close_closes_and_asks_about_unsaved_changes() {
@@ -661,6 +687,33 @@ fn a_moved_copy_key_no_longer_copies() {
     assert_eq!(h.state().session.clipboard.plain, "Aurora", "Ctrl+Alt+C copies");
 }
 
+/// Ctrl+C, Ctrl+X and Ctrl+V given to another action run it. egui-winit sends only the Copy,
+/// Cut or Paste event for them, no key press; the web build sends both, and the action runs once.
+#[test]
+fn a_clipboard_key_given_to_another_action_runs_it() {
+    let mut h = harness(new_app());
+    for (event, key) in [(egui::Event::Copy, "Cmd+C"), (egui::Event::Cut, "Cmd+X"), (egui::Event::Paste("x".into()), "Cmd+V")] {
+        h.state_mut().run("keys.set", json!({"action": "view.gridlines", "keys": [key], "replace": true})).unwrap();
+        let before = h.state().ui.gridlines;
+        h.event(event.clone());
+        h.run_steps(2);
+        assert_eq!(h.state().ui.gridlines, !before, "{key} as the event alone toggles the gridlines");
+        // The key press and the event in one frame, as the web build gets them: one toggle, not two.
+        let k = match key {
+            "Cmd+C" => Key::C,
+            "Cmd+X" => Key::X,
+            _ => Key::V,
+        };
+        let events = &mut h.input_mut().events;
+        events.push(egui::Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND });
+        events.push(event);
+        h.step();
+        h.run_steps(2);
+        assert_eq!(h.state().ui.gridlines, before, "{key} with its key press toggles once");
+    }
+    assert_eq!(h.state().session.clipboard.plain, "", "nothing was copied");
+}
+
 /// Slide-show keys can be remapped to plain keys.
 #[test]
 fn a_custom_show_key_advances_the_show() {
@@ -905,6 +958,14 @@ fn settings_back_up_to_a_file_and_restore_from_it() {
     std::fs::write(&file, b"\x00\x01 not json").unwrap();
     assert!(app.run("settings.import", json!({"path": file.to_string_lossy()})).is_err());
     assert_eq!(app.ui.ui_theme, theme::UiTheme::Lagoon);
+
+    // A damaged or hand-edited backup is brought into range, like `ui.json` at start-up.
+    let wild = json!({"deckcraft": "settings", "ui": {"zoom": 100.0, "uiScale": 1.0e9, "thumbsWidth": -5.0}, "prefs": {"duplicateOffset": 1.0e12}});
+    app.run("settings.import", json!({"settings": wild})).unwrap();
+    assert_eq!(app.ui.zoom, Some(*crate::ZOOM_RANGE.end()));
+    assert_eq!(app.ui.ui_scale, 3.0);
+    assert_eq!(app.ui.thumbs_width, 60.0);
+    assert_eq!(app.session.prefs.duplicate_offset, 1000.0);
 }
 
 /// Keyboard Shortcuts › Save cheat sheet…: a printable page of every key, the custom ones too.

@@ -418,6 +418,15 @@ impl UiState {
     }
 }
 
+/// The key of a Copy, Cut or Paste event (with Command/Ctrl).
+fn clipboard_key(e: &egui::Event) -> egui::Key {
+    match e {
+        egui::Event::Copy => egui::Key::C,
+        egui::Event::Cut => egui::Key::X,
+        _ => egui::Key::V,
+    }
+}
+
 /// How many recent files File › Open and Home list.
 pub const RECENT_MAX: usize = 12;
 
@@ -593,6 +602,8 @@ pub struct SlideApp {
     pub(crate) thumb_drag: Option<(usize, usize)>,
     /// Selection pane: folded groups, renaming, drag and drop.
     pub selpane: selpane::State,
+    /// Arrange ▸ Align: Align to Slide (`true`) or Align Selected Objects, ticked for that selection.
+    pub(crate) align_to: Option<(Vec<deckcraft_model::ShapeId>, bool)>,
     /// View › New Window: a second window on one presentation. `None` when it is closed.
     pub doc_window: Option<doc_window::DocWindow>,
     /// Slide Sorter: folded sections, inline rename, dragging a whole section.
@@ -674,6 +685,7 @@ impl SlideApp {
             ui_fonts: uifonts::UiFonts::default(),
             thumb_drag: None,
             selpane: selpane::State::default(),
+            align_to: None,
             doc_window: None,
             sorter: sorter::State::default(),
             slides_focused: false,
@@ -887,10 +899,11 @@ impl SlideApp {
         let part = |k: &str| backup.get(k).cloned().unwrap_or_else(|| json!({}));
         let ui: UiState = serde_json::from_value(part("ui")).map_err(|e| format!("{NOT_A_BACKUP}: {e}"))?;
         let prefs: deckcraft_engine::Prefs = serde_json::from_value(part("prefs")).map_err(|e| format!("{NOT_A_BACKUP}: {e}"))?;
+        // A backup is a file like `ui.json`: its values are brought into range the same way.
         let recent = std::mem::take(&mut self.ui.recent);
-        self.ui = UiState { recent, ..ui };
+        self.ui = UiState { recent, ..ui.sanitized() };
         self.ui.keymap.sanitize();
-        self.session.prefs = prefs;
+        self.session.prefs = prefs.sanitized();
         self.restyle = true;
         Ok(json!({"restored": true}))
     }
@@ -1066,13 +1079,23 @@ impl SlideApp {
     /// the user gave their key to another action, or gave the action other keys, the event is
     /// dropped and the key press does what the custom keys say.
     fn clipboard_key_moved(&self, e: &egui::Event) -> bool {
-        let key = match e {
-            egui::Event::Copy => egui::Key::C,
-            egui::Event::Cut => egui::Key::X,
-            _ => egui::Key::V,
-        };
-        let c = keymap::Combo::from_egui(key, egui::Modifiers::COMMAND);
-        self.ui.keymap.hit(keymap::Scope::Editor, &c) != keymap::Hit::Pass
+        self.clipboard_key_hit(e) != keymap::Hit::Pass
+    }
+
+    fn clipboard_key_hit(&self, e: &egui::Event) -> keymap::Hit {
+        let c = keymap::Combo::from_egui(clipboard_key(e), egui::Modifiers::COMMAND);
+        self.ui.keymap.hit(keymap::Scope::Editor, &c)
+    }
+
+    /// The action a custom Ctrl+C, Ctrl+X or Ctrl+V runs. egui-winit sends only the Copy, Cut or
+    /// Paste event for these keys, no key press, so the event runs it; when a key press came too
+    /// (`pressed`), that runs it instead, and only once.
+    fn run_moved_clipboard_key(&mut self, e: &egui::Event, pressed: &[egui::Key]) {
+        if let keymap::Hit::Run(id) = self.clipboard_key_hit(e)
+            && !pressed.contains(&clipboard_key(e))
+        {
+            let _ = self.run(&id, json!({}));
+        }
     }
 
     /// The interface colours for the current theme and light/dark choice.
@@ -1174,7 +1197,8 @@ impl SlideApp {
                 // Every slide for "all slides", one download each, named like the desktop export (#64).
                 let name = self.session.active().map(|d| d.title()).unwrap_or_else(|| "Presentation".into());
                 let mut any = false;
-                for (file, bytes) in web_image_files(&doc, slide, all, &name, ext) {
+                let transparent = extra.get("transparentBackground").and_then(Value::as_bool).unwrap_or(false);
+                for (file, bytes) in web_image_files(&doc, slide, all, &name, ext, transparent) {
                     any = self.download(&file, Ok(bytes)) || any;
                 }
                 return any;
@@ -1650,6 +1674,26 @@ impl SlideApp {
         self.session.execute("file.open", &json!({"path": path})).map_err(|e| e.to_string())?;
         self.note_recent(path);
         Ok(())
+    }
+
+    /// Files the system hands over (the command line, a double-click through the file
+    /// association), opened in order. When the last one is a PowerPoint Show (`.ppsx`), its slide
+    /// show starts at once from where Play from Start begins, as PowerPoint does; anything else
+    /// opens for editing, and File › Open opens a `.ppsx` for editing too. Returns the files that
+    /// couldn't be opened, with the reason.
+    pub fn open_from_system(&mut self, paths: &[String]) -> Vec<(String, String)> {
+        let mut failed = Vec::new();
+        let mut last = None;
+        for p in paths {
+            match self.open_path(p) {
+                Ok(()) => last = Some(p),
+                Err(e) => failed.push((p.clone(), e)),
+            }
+        }
+        if last.is_some_and(|p| p.to_ascii_lowercase().ends_with(".ppsx")) {
+            self.start_show(self.show_start_index(), false);
+        }
+        failed
     }
 
     /// A presentation was opened from `path`: first in the recent list, shown in Normal view.
@@ -2174,12 +2218,24 @@ impl SlideApp {
             self.drain_requests();
             return;
         }
-        // A Ctrl+V moved to another action (File › Settings › Keyboard Shortcuts) pastes no image either.
-        let img = if image_paste && !self.clipboard_key_moved(&egui::Event::Paste(String::new())) {
+        // A Ctrl+V moved to another action (File › Settings › Keyboard Shortcuts) pastes no image
+        // either: it runs that action.
+        let img = if image_paste && self.clipboard_key_moved(&egui::Event::Paste(String::new())) {
+            self.run_moved_clipboard_key(&egui::Event::Paste(String::new()), &[]);
+            None
+        } else if image_paste {
             self.services.clipboard_image.as_mut().and_then(|f| f())
         } else {
             None
         };
+        // Command-key presses that came as key events too (not the case with egui-winit).
+        let pressed: Vec<egui::Key> = events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::Key { key, pressed: true, modifiers, .. } if modifiers.command || modifiers.ctrl => Some(*key),
+                _ => None,
+            })
+            .collect();
         if let Some(png) = img {
             let data = deckcraft_engine::cmd::base64_encode(&png);
             if let Err(e) = self.session.execute("insert.picture", &json!({"name": "Pasted image.png", "data": data})) {
@@ -2196,7 +2252,9 @@ impl SlideApp {
                     }
                 }
                 egui::Event::Ime(ime) => self.ime_event(&ime),
-                egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) if self.clipboard_key_moved(&e) => {}
+                egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) if self.clipboard_key_moved(&e) => {
+                    self.run_moved_clipboard_key(&e, &pressed);
+                }
                 egui::Event::Copy => self.publish_clipboard(ctx, false),
                 egui::Event::Cut => self.publish_clipboard(ctx, true),
                 egui::Event::Paste(text) => {
@@ -2492,8 +2550,16 @@ pub fn now_ms() -> f64 {
 }
 
 /// Images for the browser download: the current slide, or every slide (named `<name>1.png`,
-/// `<name>2.png`... like the native export) when `all`.
-fn web_image_files(doc: &deckcraft_model::Presentation, current: usize, all: bool, name: &str, ext: &str) -> Vec<(String, Vec<u8>)> {
+/// `<name>2.png`... like the native export) when `all`. `transparent` leaves the slide
+/// background out (PNG only, #784).
+fn web_image_files(
+    doc: &deckcraft_model::Presentation,
+    current: usize,
+    all: bool,
+    name: &str,
+    ext: &str,
+    transparent: bool,
+) -> Vec<(String, Vec<u8>)> {
     let slides: Vec<usize> = if all { (0..doc.slides.len()).collect() } else { vec![current] };
     let single = slides.len() == 1;
     let scale = 2.0;
@@ -2502,7 +2568,8 @@ fn web_image_files(doc: &deckcraft_model::Presentation, current: usize, all: boo
         .into_iter()
         .enumerate()
         .map(|(k, i)| {
-            let img = deckcraft_render::render_slide(doc, i, &deckcraft_render::RenderOpts { scale, ..Default::default() });
+            let opts = deckcraft_render::RenderOpts { scale, transparent_background: transparent && ext == "png", ..Default::default() };
+            let img = deckcraft_render::render_slide(doc, i, &opts);
             let bytes = if ext == "png" { img.to_png_at(dpi) } else { img.to_jpeg_at(92, Some(dpi)) };
             let file = if single { format!("{name}.{ext}") } else { format!("{name}{}.{ext}", k + 1) };
             (file, bytes)
@@ -2603,12 +2670,36 @@ mod tests {
             doc.slides.push(first);
         }
         assert_eq!(doc.slides.len(), 3);
-        let all = web_image_files(&doc, 1, true, "Deck", "png");
+        let all = web_image_files(&doc, 1, true, "Deck", "png", false);
         let names: Vec<&str> = all.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, ["Deck1.png", "Deck2.png", "Deck3.png"]);
-        let one = web_image_files(&doc, 1, false, "Deck", "png");
+        let one = web_image_files(&doc, 1, false, "Deck", "png", false);
         assert_eq!(one.len(), 1);
         assert_eq!(one[0].0, "Deck.png");
+    }
+
+    /// The web PNG download honours "Transparent background" (#784): the slide background is
+    /// left out, so the corner is transparent; a JPEG download stays opaque.
+    #[test]
+    fn web_png_export_can_leave_the_background_transparent() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let got: Rc<RefCell<Vec<(String, Vec<u8>)>>> = Rc::default();
+        let log = got.clone();
+        let services = Services {
+            download: Some(Box::new(move |name: &str, b: &[u8]| log.borrow_mut().push((name.to_string(), b.to_vec())))),
+            ..Default::default()
+        };
+        let mut app = SlideApp::new(Session::with_new(), services);
+        let corner_alpha = |bytes: &[u8]| deckcraft_render::decode_image(bytes).unwrap().get_pixel(2, 2).0[3];
+        assert!(app.export_as("png", json!({})));
+        assert!(app.export_as("png", json!({"transparentBackground": true})));
+        assert!(app.export_as("jpeg", json!({"transparentBackground": true})));
+        let got = got.borrow();
+        assert_eq!(got.len(), 3);
+        assert_eq!(corner_alpha(&got[0].1), 255, "opaque by default");
+        assert_eq!(corner_alpha(&got[1].1), 0, "transparent background");
+        assert_eq!(corner_alpha(&got[2].1), 255, "JPEG has no transparency");
     }
 
     fn title_text(app: &SlideApp) -> String {

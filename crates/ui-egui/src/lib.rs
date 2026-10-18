@@ -410,6 +410,15 @@ impl UiState {
     }
 }
 
+/// The key of a Copy, Cut or Paste event (with Command/Ctrl).
+fn clipboard_key(e: &egui::Event) -> egui::Key {
+    match e {
+        egui::Event::Copy => egui::Key::C,
+        egui::Event::Cut => egui::Key::X,
+        _ => egui::Key::V,
+    }
+}
+
 /// How many recent files File › Open and Home list.
 pub const RECENT_MAX: usize = 12;
 
@@ -868,10 +877,11 @@ impl SlideApp {
         let part = |k: &str| backup.get(k).cloned().unwrap_or_else(|| json!({}));
         let ui: UiState = serde_json::from_value(part("ui")).map_err(|e| format!("{NOT_A_BACKUP}: {e}"))?;
         let prefs: deckcraft_engine::Prefs = serde_json::from_value(part("prefs")).map_err(|e| format!("{NOT_A_BACKUP}: {e}"))?;
+        // A backup is a file like `ui.json`: its values are brought into range the same way.
         let recent = std::mem::take(&mut self.ui.recent);
-        self.ui = UiState { recent, ..ui };
+        self.ui = UiState { recent, ..ui.sanitized() };
         self.ui.keymap.sanitize();
-        self.session.prefs = prefs;
+        self.session.prefs = prefs.sanitized();
         self.restyle = true;
         Ok(json!({"restored": true}))
     }
@@ -956,13 +966,23 @@ impl SlideApp {
     /// the user gave their key to another action, or gave the action other keys, the event is
     /// dropped and the key press does what the custom keys say.
     fn clipboard_key_moved(&self, e: &egui::Event) -> bool {
-        let key = match e {
-            egui::Event::Copy => egui::Key::C,
-            egui::Event::Cut => egui::Key::X,
-            _ => egui::Key::V,
-        };
-        let c = keymap::Combo::from_egui(key, egui::Modifiers::COMMAND);
-        self.ui.keymap.hit(keymap::Scope::Editor, &c) != keymap::Hit::Pass
+        self.clipboard_key_hit(e) != keymap::Hit::Pass
+    }
+
+    fn clipboard_key_hit(&self, e: &egui::Event) -> keymap::Hit {
+        let c = keymap::Combo::from_egui(clipboard_key(e), egui::Modifiers::COMMAND);
+        self.ui.keymap.hit(keymap::Scope::Editor, &c)
+    }
+
+    /// The action a custom Ctrl+C, Ctrl+X or Ctrl+V runs. egui-winit sends only the Copy, Cut or
+    /// Paste event for these keys, no key press, so the event runs it; when a key press came too
+    /// (`pressed`), that runs it instead, and only once.
+    fn run_moved_clipboard_key(&mut self, e: &egui::Event, pressed: &[egui::Key]) {
+        if let keymap::Hit::Run(id) = self.clipboard_key_hit(e)
+            && !pressed.contains(&clipboard_key(e))
+        {
+            let _ = self.run(&id, json!({}));
+        }
     }
 
     /// The interface colours for the current theme and light/dark choice.
@@ -2039,12 +2059,24 @@ impl SlideApp {
             self.drain_requests();
             return;
         }
-        // A Ctrl+V moved to another action (File › Settings › Keyboard Shortcuts) pastes no image either.
-        let img = if image_paste && !self.clipboard_key_moved(&egui::Event::Paste(String::new())) {
+        // A Ctrl+V moved to another action (File › Settings › Keyboard Shortcuts) pastes no image
+        // either: it runs that action.
+        let img = if image_paste && self.clipboard_key_moved(&egui::Event::Paste(String::new())) {
+            self.run_moved_clipboard_key(&egui::Event::Paste(String::new()), &[]);
+            None
+        } else if image_paste {
             self.services.clipboard_image.as_mut().and_then(|f| f())
         } else {
             None
         };
+        // Command-key presses that came as key events too (not the case with egui-winit).
+        let pressed: Vec<egui::Key> = events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::Key { key, pressed: true, modifiers, .. } if modifiers.command || modifiers.ctrl => Some(*key),
+                _ => None,
+            })
+            .collect();
         if let Some(png) = img {
             let data = deckcraft_engine::cmd::base64_encode(&png);
             if let Err(e) = self.session.execute("insert.picture", &json!({"name": "Pasted image.png", "data": data})) {
@@ -2061,7 +2093,9 @@ impl SlideApp {
                     }
                 }
                 egui::Event::Ime(ime) => self.ime_event(&ime),
-                egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) if self.clipboard_key_moved(&e) => {}
+                egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) if self.clipboard_key_moved(&e) => {
+                    self.run_moved_clipboard_key(&e, &pressed);
+                }
                 egui::Event::Copy => self.publish_clipboard(ctx, false),
                 egui::Event::Cut => self.publish_clipboard(ctx, true),
                 egui::Event::Paste(text) => {

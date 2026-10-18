@@ -431,10 +431,15 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64, 
     });
     let mut keep = true;
     let mut actions = vec![];
-    for (k, m) in keys {
+    for (pressed, pressed_mods) in keys {
         use egui::Key::*;
         // Custom slide-show keys (File › Settings › Keyboard Shortcuts) map onto the built-in ones.
-        let Some((k, m)) = keymap.show_key(k, m) else { continue };
+        // A built-in key whose action has other keys now does nothing, and a focused presenter
+        // button doesn't get it either.
+        let Some((k, m)) = keymap.show_key(pressed, pressed_mods) else {
+            ctx.input_mut(|i| i.consume_key(pressed_mods, pressed));
+            continue;
+        };
         if show.grid && !matches!(k, Escape | Minus) {
             // See All Slides takes no other keys until a slide is chosen.
             if k == G && plain(m) {
@@ -508,8 +513,8 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64, 
             }
         }
         // The same key must not also activate a focused presenter button or be handled again
-        // by an embedded presenter viewport.
-        ctx.input_mut(|i| i.consume_key(m, k));
+        // by an embedded presenter viewport: the key pressed, which a custom key maps from.
+        ctx.input_mut(|i| i.consume_key(pressed_mods, pressed));
         ctx.request_repaint_of(egui::ViewportId::ROOT);
     }
     for action in actions {
@@ -1939,6 +1944,48 @@ mod tests {
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
         assert!(!harness.state().2, "Escape from Presenter View ends the show");
+    }
+
+    /// A custom show key is used up as the key that was pressed, not the built-in key it maps to,
+    /// so a focused presenter button doesn't also get it; neither does a built-in key whose
+    /// action now has other keys.
+    #[test]
+    fn custom_show_keys_dont_also_press_the_focused_button() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut session = deckcraft_engine::Session::with_new();
+        for _ in 0..3 {
+            session.execute("slide.new", &json!({})).unwrap();
+        }
+        let doc = session.active().unwrap().doc.clone();
+        let mut keymap = crate::keymap::Keymap::default();
+        // Space goes back now (Previous), and Enter no longer advances (Next has only N).
+        keymap.set(&json!({"action": "show:next", "keys": ["N"]})).unwrap();
+        keymap.set(&json!({"action": "show:previous", "keys": ["Space"]})).unwrap();
+        let show = Show::new(&doc, 0, false, true);
+        let mut harness = egui_kittest::Harness::builder().with_size(vec2(1100.0, 700.0)).build_ui_state(
+            move |ui, (doc, show, keep): &mut (std::sync::Arc<Presentation>, Show, bool)| {
+                let now = ui.input(|i| i.time);
+                presenter_window(ui.ctx(), show, doc, now, keep, &keymap);
+            },
+            (doc, show, true),
+        );
+        harness.run_steps(2);
+        // On slide 2, with the keyboard on the Next button.
+        for _ in 0..2 {
+            harness.get_by_label("Next ▶").click();
+            harness.run_steps(2);
+        }
+        assert_eq!(harness.state().1.state.slide, 2);
+        harness.get_by_label("Next ▶").focus();
+        harness.run_steps(2);
+        assert!(harness.ctx.memory(|m| m.focused()).is_some(), "Next has the keyboard");
+        harness.key_press(egui::Key::Space);
+        harness.run_steps(2);
+        assert_eq!(harness.state().1.state.slide, 1, "Space goes back once, without also pressing Next");
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        assert_eq!(harness.state().1.state.slide, 1, "Enter does nothing, not even press Next");
     }
 
     #[test]

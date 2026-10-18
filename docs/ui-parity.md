@@ -33,8 +33,6 @@ ends and are omitted from thumbnails, slide shows and exports.
 | Command search (Tell Me) | yes | command palette | |
 | Light / dark appearance | follows the system | light or dark; doesn't follow the system (#41) | 1–2 h |
 | Interface themes and high contrast | Office Theme (Colorful, Dark Gray, Black, White) on File › Account; follows the system's high-contrast mode | File › Account (also the title bar's gear): Standard, High Contrast (WCAG AAA text, outlined controls), Lagoon, Sunset and Custom (own tint and accent, text kept readable), each light or dark, with previews (`view.uiTheme`); doesn't follow the system's high-contrast setting | 1–2 h |
-| One window per presentation, New Window, Arrange All | yes | tabs in one window; no New Window | 3–5 h |
-| Quick Access Toolbar customization | yes | no | P1 partial |
 | One window per presentation, New Window, Arrange All | yes | New Window opens one more window on the same presentation (its own slide, live with edits); tabs stay in the first window; no Arrange All | Arrange All |
 | Quick Access Toolbar customization | yes | yes: Customize menu (common commands, reset), right-click any ribbon button to add, right-click a toolbar button to remove; saved with the UI state | done |
 

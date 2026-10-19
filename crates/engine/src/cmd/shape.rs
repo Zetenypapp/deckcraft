@@ -1043,7 +1043,9 @@ fn set_default(s: &mut Session, _p: &Value) -> Result<Value> {
     s.prefs.default_shape = Some(super::format::Painted {
         run: sh.text.as_ref().and_then(|t| t.paragraphs.first()).and_then(|p| p.runs.first()).map(|r| r.props.clone()),
         para: None,
-        fill: sh.fill.clone(),
+        // A picture fill names a picture of this presentation: elsewhere it would be missing or
+        // another picture, so new shapes keep their style's fill instead.
+        fill: sh.fill.clone().filter(|f| !matches!(f, deckcraft_model::Fill::Picture(_))),
         line: sh.line.clone(),
         effects: sh.effects.clone(),
         style: sh.style.clone(),

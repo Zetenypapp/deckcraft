@@ -2076,10 +2076,17 @@ fn shortcuts(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
 fn record_key(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
     use crate::keymap::Combo;
     let Some(id) = bs.recording.clone() else { return };
+    // egui-winit sends Ctrl+C, Ctrl+X and Ctrl+V as Copy, Cut and Paste events, with no key press.
     let presses: Vec<(egui::Key, egui::Modifiers)> = ui.input(|i| {
         i.events
             .iter()
-            .filter_map(|e| if let egui::Event::Key { key, pressed: true, modifiers, .. } = e { Some((*key, *modifiers)) } else { None })
+            .filter_map(|e| match e {
+                egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
+                egui::Event::Copy => Some((egui::Key::C, egui::Modifiers::COMMAND)),
+                egui::Event::Cut => Some((egui::Key::X, egui::Modifiers::COMMAND)),
+                egui::Event::Paste(_) => Some((egui::Key::V, egui::Modifiers::COMMAND)),
+                _ => None,
+            })
             .collect()
     });
     let Some((key, m)) = presses.into_iter().next() else { return };

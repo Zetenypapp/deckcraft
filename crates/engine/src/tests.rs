@@ -1523,6 +1523,33 @@ fn the_default_shape_is_kept_in_the_prefs() {
     assert_eq!(fill, s.prefs.default_shape.as_ref().and_then(|d| d.fill.clone()), "a new shape in the next session has the look");
 }
 
+/// A picture fill stays out of the default shape: its picture belongs to one presentation, and
+/// new shapes elsewhere would show a missing or wrong picture.
+#[test]
+fn the_default_shape_leaves_a_picture_fill_out() {
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgba8(image::RgbaImage::new(4, 4)).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let mut s = Session::new();
+    s.execute("file.new", &json!({})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [50, 50, 100, 60]})).unwrap();
+    s.execute("shape.fill", &json!({"picture": cmd::base64_encode(&png)})).unwrap();
+    s.execute("shape.line", &json!({"width": 4, "color": "#00FF00"})).unwrap();
+    s.execute("shape.setDefault", &json!({})).unwrap();
+    let d = s.prefs.default_shape.clone().expect("a default shape");
+    assert_eq!(d.fill, None, "no picture fill kept");
+    assert!(d.line.is_some(), "the rest of the look is kept");
+    s.execute("file.new", &json!({})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [50, 50, 100, 60]})).unwrap();
+    let fill = s.doc().unwrap().selected_shapes().first().and_then(|sh| sh.fill.clone());
+    assert!(!matches!(fill, Some(deckcraft_model::Fill::Picture(_))), "{fill:?}");
+    // A prefs.json from before this keeps the rest of the look but drops the picture fill.
+    let mut old = d;
+    old.fill = Some(deckcraft_model::Fill::Picture(Default::default()));
+    let prefs = crate::Prefs { default_shape: Some(old), ..crate::Prefs::default() }.sanitized();
+    let d = prefs.default_shape.expect("kept");
+    assert!(d.fill.is_none() && d.line.is_some());
+}
+
 /// #725: a layout with a small body placeholder ahead of its content placeholder (as Keynote
 /// exports "Title & Bullets") still gets the body in the content placeholder (`idx="1"`).
 #[test]

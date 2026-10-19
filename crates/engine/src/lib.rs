@@ -394,6 +394,12 @@ impl Prefs {
         if self.author.chars().count() > 256 {
             self.author = self.author.chars().take(256).collect();
         }
+        // A picture fill in the default shape names a picture no other presentation has.
+        if let Some(d) = &mut self.default_shape
+            && matches!(d.fill, Some(deckcraft_model::Fill::Picture(_)))
+        {
+            d.fill = None;
+        }
         self
     }
 }

@@ -391,7 +391,8 @@ impl UiState {
         let within = |v: f32, lo: f32, hi: f32, default: f32| if v.is_finite() { v.clamp(lo, hi) } else { default };
         self.zoom = self.zoom.filter(|z| z.is_finite() && *z > 0.0).map(|z| z.clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end()));
         self.sorter_zoom = within(self.sorter_zoom, 0.5, 3.0, d.sorter_zoom);
-        self.ui_scale = within(self.ui_scale, 0.5, 3.0, d.ui_scale);
+        // The limits File › Settings › General and `view.interfaceSize` keep to.
+        self.ui_scale = within(self.ui_scale, MIN_UI_SCALE, MAX_UI_SCALE, d.ui_scale);
         self.notes_height = within(self.notes_height, 0.0, 2000.0, d.notes_height);
         self.thumbs_width = within(self.thumbs_width, 60.0, 1000.0, d.thumbs_width);
         self.pane_width = within(self.pane_width, 240.0, 520.0, d.pane_width);

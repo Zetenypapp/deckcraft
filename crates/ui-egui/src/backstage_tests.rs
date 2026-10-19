@@ -774,6 +774,18 @@ fn the_shortcuts_page_records_keys_and_asks_before_moving_one() {
     h.run_steps(3);
     assert!(h.state().backstage.as_ref().unwrap().key_note.is_some());
     assert_eq!(keys(&h).map(|k| k.len()), Some(3));
+
+    // Ctrl+C comes as a Copy event only (egui-winit): it is recorded too, after asking, since
+    // Copy has it.
+    h.get_by_label("Add a key to Gridlines").click();
+    h.run_steps(2);
+    h.event(egui::Event::Copy);
+    h.run_steps(3);
+    assert!(h.state().backstage.as_ref().unwrap().recording.is_none(), "recording ended");
+    assert!(h.state().backstage.as_ref().unwrap().clash.is_some());
+    h.get_by_label("Move it here").click();
+    h.run_steps(3);
+    assert!(keys(&h).unwrap().contains(&"Cmd+C".to_string()));
 }
 
 /// Settings › Reset asks first, then puts everything back but the recent files.
@@ -963,7 +975,7 @@ fn settings_back_up_to_a_file_and_restore_from_it() {
     let wild = json!({"deckcraft": "settings", "ui": {"zoom": 100.0, "uiScale": 1.0e9, "thumbsWidth": -5.0}, "prefs": {"duplicateOffset": 1.0e12}});
     app.run("settings.import", json!({"settings": wild})).unwrap();
     assert_eq!(app.ui.zoom, Some(*crate::ZOOM_RANGE.end()));
-    assert_eq!(app.ui.ui_scale, 3.0);
+    assert_eq!(app.ui.ui_scale, crate::MAX_UI_SCALE, "the Settings slider's limit");
     assert_eq!(app.ui.thumbs_width, 60.0);
     assert_eq!(app.session.prefs.duplicate_offset, 1000.0);
 }

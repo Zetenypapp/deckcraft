@@ -251,9 +251,10 @@ impl Show {
         false
     }
 
-    /// The laser dot is drawn: Ctrl+L's, or a hold's while the pen is off.
+    /// The laser dot is drawn: Ctrl+L's, or a hold's while the slide still takes the pointer (no
+    /// pen, black or white screen, zoom or See All Slides turned on since the press).
     fn laser_dot(&self) -> bool {
-        self.laser || (self.held_laser && !self.pen)
+        self.laser || (self.held_laser && !self.pen && self.blank.is_none() && self.zoom.is_none() && !self.zoom_arm && !self.grid)
     }
 
     /// The arrow pointer: no ink and no laser dot.
@@ -2200,6 +2201,17 @@ mod tests {
         show.set_pen(true);
         assert!(!show.laser_dot(), "no dot with the pen");
         assert!(show.hold_laser(3.6, false, false, true, false), "the release is still no click");
+        // A black screen or a zoom during a hold.
+        show.set_pen(false);
+        show.hold_laser(4.0, true, true, false, true);
+        show.hold_laser(4.5, false, true, false, true);
+        assert!(show.laser_dot());
+        show.blank = Some(Color32::BLACK);
+        assert!(!show.laser_dot(), "no dot on a black screen");
+        show.blank = None;
+        show.zoom_key();
+        assert!(!show.laser_dot(), "no dot while zoom waits for its click");
+        assert!(show.hold_laser(4.6, false, false, true, false), "the release is still no click");
     }
 
     /// Holding on a GIF's play button shows no laser, and the release still plays or pauses it.

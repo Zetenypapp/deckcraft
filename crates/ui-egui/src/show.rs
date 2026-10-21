@@ -2173,9 +2173,16 @@ mod tests {
         assert_eq!(slide(&h), Some(1), "and doesn't advance");
         // With the pen, a hold draws and shows no dot.
         h.state_mut().show.as_mut().unwrap().set_pen(true);
+        // egui picks the widget a press goes to from the frame before: draw one with the pen on.
+        h.run_steps(2);
         h.event(button(true));
+        h.run_steps(2);
+        for i in 1..=10 {
+            h.event(egui::Event::PointerMoved(pos2(650.0 + 5.0 * i as f32, 400.0 + 2.0 * i as f32)));
+        }
         h.run_steps(30);
         assert!(!held(&h));
+        assert!(h.state().show.as_ref().is_some_and(|s| s.strokes.iter().any(|st| !st.is_empty())), "the pen drew");
         h.event(button(false));
         h.run_steps(2);
         assert_eq!(slide(&h), Some(1));

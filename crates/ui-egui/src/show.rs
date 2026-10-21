@@ -41,6 +41,10 @@ pub struct Show {
     pen: bool,
     /// A dot that follows the pointer and leaves no ink (`Cmd/Ctrl+L`).
     laser: bool,
+    /// When the left button went down on the slide, while it is held (#1012).
+    press_at: Option<f64>,
+    /// The laser dot shown while the left button is held, as in PowerPoint (#1012).
+    held_laser: bool,
     strokes: Vec<Vec<Pos2>>,
     /// Digits typed for Go to Slide, shown until Enter, Esc, or a short pause.
     goto: String,
@@ -192,6 +196,8 @@ impl Show {
             thumbs: vec![],
             pen: false,
             laser: false,
+            press_at: None,
+            held_laser: false,
             strokes: vec![],
             goto: String::new(),
             goto_at: 0.0,
@@ -224,6 +230,24 @@ impl Show {
         if on {
             self.pen = false;
         }
+    }
+
+    /// Holding the left button on the slide shows the laser dot until it is let go; that release
+    /// is no click (#1012). `pressed`, `down` and `released` are the left button this frame, and
+    /// `allowed` says the slide takes the pointer (no pen, laser, grid, black screen…). Returns
+    /// whether this frame's click is used up by the hold.
+    fn hold_laser(&mut self, now: f64, pressed: bool, down: bool, released: bool, allowed: bool) -> bool {
+        if pressed {
+            self.press_at = allowed.then_some(now);
+        }
+        if down && allowed && self.press_at.is_some_and(|t| now - t >= LASER_HOLD) {
+            self.held_laser = true;
+        }
+        if released || !down {
+            self.press_at = None;
+            return std::mem::take(&mut self.held_laser);
+        }
+        false
     }
 
     /// The arrow pointer: no ink and no laser dot.
@@ -518,6 +542,10 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64) 
     keep
 }
 
+/// How long the left button is held before the laser dot shows (#1012); a shorter press is a
+/// click.
+const LASER_HOLD: f64 = 0.3;
+
 pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     let Some((doc_uid, doc)) = app.session.active().map(|d| (d.uid, d.doc.clone())) else {
@@ -560,6 +588,13 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         && !show.zoom_arm
         && !show.reading_bar_hit(&ctx)
         && !pointer_on_media_bar(&ctx, ui, &doc, &show);
+    let (pressed, down, released) = ctx.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_down(), i.pointer.primary_released()));
+    let held = show.hold_laser(now, pressed, down, released, on_slide || show.held_laser);
+    let clicked = clicked && !held;
+    if show.press_at.is_some() && !show.held_laser {
+        // The dot appears when the hold is long enough, also without the pointer moving.
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(LASER_HOLD));
+    }
     let gif_click = if clicked && on_slide && doc.show.show_media_controls { gif_hit(&ctx, ui, &show, doc_uid, &doc, app) } else { None };
     let media_click = if clicked && on_slide && gif_click.is_none() { media_hit(&ctx, ui, &show, &doc) } else { None };
     let under = if on_slide && gif_click.is_none() && media_click.is_none() { shapes_under_pointer(&ctx, ui, &mut show, &doc, now) } else { None };
@@ -914,7 +949,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             s.push(pos2(nx, ny));
         }
         ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
-    } else if show.laser {
+    } else if show.laser || show.held_laser {
         ctx.set_cursor_icon(egui::CursorIcon::None);
     } else if show.zoom_arm || show.grid {
         ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
@@ -932,7 +967,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         let pts: Vec<Pos2> = s.iter().map(|q| slide_to_screen(srect, uv, q.x, q.y)).collect();
         painter.add(egui::Shape::line(pts, Stroke::new(3.0, pen_col)));
     }
-    if show.laser
+    if (show.laser || show.held_laser)
         && !show.ended
         && let Some(p) = ctx.input(|i| i.pointer.hover_pos())
     {
@@ -2076,6 +2111,64 @@ mod tests {
         assert!(show.apply(a, &doc, 3.0));
         show.cue_media(&doc, 1, 9.0);
         assert!(show.media_cues.is_empty());
+    }
+
+    /// Holding the left button shows the laser dot and doesn't advance; a quick click still does,
+    /// and with the pen a hold draws instead (#1012).
+    #[test]
+    fn holding_the_left_button_shows_the_laser_without_advancing() {
+        let mut session = deckcraft_engine::Session::with_new();
+        for _ in 0..3 {
+            session.execute("slide.new", &json!({})).unwrap();
+        }
+        let mut app = SlideApp::new(session, crate::Services::default());
+        app.start_show(0, true);
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1200.0, 800.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            app,
+        );
+        h.run_steps(3);
+        let at = pos2(600.0, 380.0);
+        let button =
+            |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let slide = |h: &egui_kittest::Harness<'_, SlideApp>| h.state().show.as_ref().map(|s| s.state.slide);
+        let held = |h: &egui_kittest::Harness<'_, SlideApp>| h.state().show.as_ref().is_some_and(|s| s.held_laser);
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        // A quick click advances.
+        h.event(button(true));
+        h.run_steps(2);
+        h.event(button(false));
+        h.run_steps(2);
+        assert_eq!(slide(&h), Some(1));
+        // A hold shows the dot (also without moving), and letting go leaves the slide as it was.
+        h.event(button(true));
+        h.run_steps(10);
+        assert!(!held(&h), "not before the hold time");
+        h.run_steps(20);
+        assert!(held(&h), "the dot shows while the button is held");
+        h.event(egui::Event::PointerMoved(pos2(650.0, 400.0)));
+        h.run_steps(2);
+        h.event(egui::Event::PointerButton {
+            pos: pos2(650.0, 400.0),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(2);
+        assert!(!held(&h), "letting go hides it");
+        assert_eq!(slide(&h), Some(1), "and doesn't advance");
+        // With the pen, a hold draws and shows no dot.
+        h.state_mut().show.as_mut().unwrap().set_pen(true);
+        h.event(button(true));
+        h.run_steps(30);
+        assert!(!held(&h));
+        h.event(button(false));
+        h.run_steps(2);
+        assert_eq!(slide(&h), Some(1));
     }
 
     #[test]

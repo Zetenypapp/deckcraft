@@ -238,7 +238,7 @@ pub fn cap_slides(outline: &str) -> (String, usize) {
     let mut kept = vec![];
     let mut slides = 0;
     for line in outline.lines() {
-        if line.trim_start().starts_with('#') {
+        if is_heading(line) {
             slides += 1;
         }
         if slides <= MAX_SLIDES {
@@ -252,6 +252,16 @@ pub fn cap_slides(outline: &str) -> (String, usize) {
         ),
         slides,
     )
+}
+
+/// A line `slide.fromOutline` reads as a heading, so a slide: one to six `#` (up to three spaces
+/// before them) and then a space, a tab or nothing, the rule of `md_heading` in
+/// `crates/format/src/lib.rs`. `#tag` is body text there, so it is no slide here either.
+fn is_heading(line: &str) -> bool {
+    let t = line.strip_prefix("   ").or_else(|| line.strip_prefix("  ")).or_else(|| line.strip_prefix(' ')).unwrap_or(line);
+    let hashes = t.chars().take_while(|c| *c == '#').count();
+    let rest = &t[hashes..];
+    (1..=6).contains(&hashes) && (rest.is_empty() || rest.starts_with([' ', '\t']))
 }
 
 /// The Markdown outline in a model's reply: thinking (`<think>…</think>`) and code fences
@@ -306,6 +316,14 @@ mod tests {
                 )
             })
             .collect();
+        // Only lines read as headings are slides: `#tag` and `#######` are text.
+        let tagged: String = std::iter::once("#tag".to_string()).chain((0..60).map(|i| format!("line {i}"))).collect::<Vec<_>>().join("\n");
+        assert_eq!(cap_slides(&tagged).1, 0, "no heading, so no outline");
+        let mixed = format!("#tag\n####### seven\n{long}");
+        assert_eq!(cap_slides(&mixed).1, 5000, "only the real headings count");
+        assert_eq!(cap_slides(&mixed).0.lines().filter(|l| l.starts_with("## ")).count(), MAX_SLIDES);
+        // Up to three spaces may come first; a tab can't, and a lone `#` is an empty heading.
+        assert_eq!(cap_slides("   # Indented\n\t# not a heading\n#\n").1, 2);
         let (kept, total) = cap_slides(&long);
         assert_eq!(total, 5000);
         assert_eq!(kept.lines().filter(|l| l.starts_with("##")).count(), MAX_SLIDES);

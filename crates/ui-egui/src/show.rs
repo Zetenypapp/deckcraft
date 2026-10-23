@@ -977,9 +977,10 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         painter.add(egui::Shape::line(pts, Stroke::new(3.0, pen_col)));
     }
     // The pen turned on during a hold hides its dot; the release is still no click.
+    // Where the pointer is, or the finger pressing (touch screens may report no hover).
     if show.laser_dot()
         && !show.ended
-        && let Some(p) = ctx.input(|i| i.pointer.hover_pos())
+        && let Some(p) = ctx.input(|i| i.pointer.hover_pos().or(i.pointer.interact_pos()))
     {
         let c = theme::to_color32(doc.show.laser_color);
         painter.circle_filled(p, 16.0, Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 70));

@@ -943,6 +943,12 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         painter.text(r.center(), Align2::CENTER_CENTER, label, theme::font(18.0), Color32::WHITE);
         ctx.request_repaint_after(std::time::Duration::from_millis(200));
     }
+    // A held dot hides over the reading bar, the media controls and a GIF's play button.
+    let dot = show.laser_dot()
+        && (show.laser
+            || !(show.reading_bar_hit(&ctx)
+                || pointer_on_media_bar(&ctx, ui, &doc, &show)
+                || (doc.show.show_media_controls && gif_hit(&ctx, ui, &show, doc_uid, &doc, app).is_some())));
     // Pen.
     let resp = ui.interact(full, ui.id().with("show_pen"), if show.pen { Sense::drag() } else { Sense::hover() });
     if show.pen {
@@ -958,7 +964,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             s.push(pos2(nx, ny));
         }
         ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
-    } else if show.laser || show.held_laser {
+    } else if dot {
         ctx.set_cursor_icon(egui::CursorIcon::None);
     } else if show.zoom_arm || show.grid {
         ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
@@ -978,7 +984,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     }
     // The pen turned on during a hold hides its dot; the release is still no click.
     // Where the pointer is, or the finger pressing (touch screens may report no hover).
-    if show.laser_dot()
+    if dot
         && !show.ended
         && let Some(p) = ctx.input(|i| i.pointer.hover_pos().or(i.pointer.interact_pos()))
     {
@@ -2223,8 +2229,8 @@ mod tests {
     }
 
     /// Holding on a GIF's play button shows no laser, and the release still plays or pauses it.
-    #[test]
-    fn a_hold_on_a_gif_button_stays_a_click() {
+    /// A show of one slide with an animated GIF, and where its play button is drawn.
+    fn gif_show() -> (egui_kittest::Harness<'static, SlideApp>, Pos2, ShapeId) {
         // A two-frame animated GIF: a two-slide deck exported as one, at a small size.
         let mut deck = deckcraft_engine::Session::with_new();
         deck.execute("slide.new", &json!({})).unwrap();
@@ -2252,18 +2258,52 @@ mod tests {
         let srect = fit(Rect::from_min_max(pos2(0.0, 0.0), pos2(size.x, size.y - 34.0)), &doc);
         let k = srect.width() / doc.slide_size.width as f32;
         let at = crate::media::gif_button_rect(on_screen(srect, k, &deckcraft_geom::Xfrm::new(100.0, 100.0, 300.0, 200.0))).center();
-        let button =
-            |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        (h, at, id)
+    }
+
+    fn primary(pos: Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }
+    }
+
+    #[test]
+    fn a_hold_on_a_gif_button_stays_a_click() {
+        let (mut h, at, id) = gif_show();
         h.event(egui::Event::PointerMoved(at));
         h.run_steps(2);
         let paused = |h: &egui_kittest::Harness<'_, SlideApp>| h.state().session.gif_paused.contains(&id);
         assert!(!paused(&h));
-        h.event(button(true));
+        h.event(primary(at, true));
         h.run_steps(20);
         assert!(!h.state().show.as_ref().is_some_and(|s| s.held_laser), "no laser over the button");
-        h.event(button(false));
+        h.event(primary(at, false));
         h.run_steps(2);
         assert!(paused(&h), "the release paused the GIF");
+    }
+
+    /// A hold that moves onto a control shows the pointer there, not the dot.
+    #[test]
+    fn a_held_dot_hides_over_a_control() {
+        let (mut h, at, _) = gif_show();
+        let away = pos2(900.0, 500.0);
+        h.event(egui::Event::PointerMoved(away));
+        h.run_steps(2);
+        h.event(primary(away, true));
+        h.run_steps(30);
+        let cursor = |h: &egui_kittest::Harness<'_, SlideApp>| h.output().platform_output.cursor_icon;
+        assert!(h.state().show.as_ref().is_some_and(|s| s.held_laser), "held on the slide");
+        assert_eq!(cursor(&h), egui::CursorIcon::None, "the dot, no pointer");
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(2);
+        assert_ne!(cursor(&h), egui::CursorIcon::None, "over the GIF button: the pointer");
+        h.event(egui::Event::PointerMoved(away));
+        h.run_steps(2);
+        assert_eq!(cursor(&h), egui::CursorIcon::None, "back on the slide: the dot");
+        // A black screen during the hold shows no dot, so it hides no pointer.
+        h.state_mut().show.as_mut().unwrap().blank = Some(Color32::BLACK);
+        h.run_steps(2);
+        assert_ne!(cursor(&h), egui::CursorIcon::None, "black screen: the pointer");
+        h.event(primary(away, false));
+        h.run_steps(2);
     }
 
     #[test]

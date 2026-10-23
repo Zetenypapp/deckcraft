@@ -701,7 +701,6 @@ pub fn autonum(scheme: &str, n: u32) -> String {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 /// The characters run `run` lays out: a field's current value (in the run's language `lang`), a
 /// line break as `\u{b}`, otherwise its text.
 fn shown_run(run: &deckcraft_model::text::Run, lang: Option<&str>, fields: &dyn Fields) -> String {
@@ -721,6 +720,7 @@ pub fn shown_paragraphs(ctx: &Ctx, shape: &Shape, body: &TextBody, fields: &dyn 
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn shape_para(ctx: &Ctx, shape: &Shape, body: &TextBody, pi: usize, scale: f64, opts: &Opts, number: Option<u32>, vertical: Upright) -> ParaShaped {
     let db = FontDb::global();
     let Some(para) = body.paragraphs.get(pi) else {

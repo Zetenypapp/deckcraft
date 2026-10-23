@@ -312,6 +312,28 @@ fn slide_number_fields_are_searchable_as_their_number() {
     }
 }
 
+/// A line break (Shift+Enter) inside a paragraph doesn't shift the text after it in the text layer:
+/// the layout counts it as a character, and so does the layer's text now.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_line_break_keeps_the_text_layer_in_step() {
+    use deckcraft_model::text::{Run, RunKind};
+    use deckcraft_model::{Shape, ShapeId, Xfrm};
+
+    let mut body = TextBody::from_text("one");
+    let props = body.paragraphs[0].runs[0].props.clone();
+    body.paragraphs[0].runs.push(Run { kind: RunKind::Break, text: String::new(), props: props.clone() });
+    body.paragraphs[0].runs.push(Run { kind: RunKind::Text, text: "two".into(), props });
+    for run in &mut body.paragraphs[0].runs {
+        run.props.font = Some("Ubuntu".into());
+        run.props.size = Some(20.0);
+    }
+    let mut p = deck(1);
+    Arc::make_mut(&mut p.slides[0]).shapes =
+        vec![Shape { id: ShapeId(9200), xfrm: Some(Xfrm::new(20.0, 20.0, 600.0, 120.0)), text: Some(body), ..Default::default() }];
+    assert_eq!(page_text(export(&p, &opts(PageLayout::Slides)).unwrap(), 0), "onetwo");
+}
+
 /// Notes pages and handouts print on the chosen paper, landscape included, with every slide box
 /// on the page and room left for the notes.
 #[test]

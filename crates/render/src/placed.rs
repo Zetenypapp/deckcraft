@@ -14,6 +14,8 @@ pub struct PlacedText {
     pub layout: TextLayout,
     /// Shape-local → slide points (text rotation included, flips not: see [`crate::text_transform`]).
     pub transform: Affine,
+    /// The text as saved. Its character offsets are not `layout`'s where a field or a line break
+    /// is drawn differently: read the text the runs index into from `shown`.
     pub body: TextBody,
     /// Each paragraph's text as laid out, fields evaluated: what `layout`'s runs index into.
     pub shown: Vec<String>,

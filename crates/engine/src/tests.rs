@@ -1653,6 +1653,16 @@ fn the_default_shape_leaves_a_picture_fill_out() {
     assert!(d.fill.is_none() && d.line.is_some());
 }
 
+/// A hand-edited prefs.json spells the new-presentation size its own way: "Standard" is read as
+/// standard everywhere, anything else as widescreen.
+#[test]
+fn the_new_presentation_size_is_one_spelling_after_loading() {
+    for (saved, kept) in [("Standard", "standard"), ("STANDARD", "standard"), ("standard", "standard"), ("huge", ""), ("", "")] {
+        let prefs = crate::Prefs { new_size: saved.into(), ..crate::Prefs::default() }.sanitized();
+        assert_eq!(prefs.new_size, kept, "{saved:?}");
+    }
+}
+
 #[test]
 fn outline_rtf_exports_and_opens_back() {
     let mut s = session();

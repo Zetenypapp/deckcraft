@@ -140,6 +140,8 @@ pub struct Tokens {
     /// The ribbon card and popovers.
     pub card: Color32,
     pub card_border: Color32,
+    /// Text fields. They have no outline, so the fill alone must set them apart from the card.
+    pub text_field: Color32,
     /// Canvas around the slide.
     pub canvas: Color32,
     pub text: Color32,
@@ -161,6 +163,12 @@ pub struct Tokens {
     pub caret: Color32,
     pub text_selection: Color32,
     pub field_bg: Color32,
+    /// Unchecked checkbox and radio boxes and slider rails, drawn without an outline, so they
+    /// must stand apart from the card and the chrome.
+    pub control: Color32,
+    /// [`Tokens::control`] under the pointer and pressed: a step darker each in light mode.
+    pub control_hover: Color32,
+    pub control_pressed: Color32,
     pub shadow: Color32,
 }
 
@@ -172,6 +180,7 @@ impl Tokens {
             chrome: Color32::from_rgb(0xF5, 0xF5, 0xF5),
             card: Color32::WHITE,
             card_border: Color32::from_rgb(0xE3, 0xE3, 0xE3),
+            text_field: Color32::from_rgb(0xEB, 0xEB, 0xEB),
             canvas: Color32::from_rgb(0xF0, 0xF0, 0xF0),
             text: Color32::from_rgb(0x24, 0x24, 0x24),
             text_dim: Color32::from_rgb(0x5C, 0x5C, 0x5C),
@@ -191,6 +200,9 @@ impl Tokens {
             caret: Color32::BLACK,
             text_selection: Color32::from_rgba_unmultiplied(0x5A, 0x8F, 0xE0, 90),
             field_bg: Color32::WHITE,
+            control: Color32::from_rgb(0xD6, 0xD6, 0xD6),
+            control_hover: Color32::from_rgb(0xC8, 0xC8, 0xC8),
+            control_pressed: Color32::from_rgb(0xBC, 0xBC, 0xBC),
             shadow: Color32::from_black_alpha(28),
         }
     }
@@ -201,6 +213,7 @@ impl Tokens {
             chrome: Color32::from_rgb(0x26, 0x26, 0x26),
             card: Color32::from_rgb(0x33, 0x33, 0x33),
             card_border: Color32::from_rgb(0x44, 0x44, 0x44),
+            text_field: Color32::from_rgb(0x2A, 0x2A, 0x2A),
             canvas: Color32::from_rgb(0x1E, 0x1E, 0x1E),
             text: Color32::from_rgb(0xEE, 0xEE, 0xEE),
             text_dim: Color32::from_rgb(0xBB, 0xBB, 0xBB),
@@ -220,6 +233,9 @@ impl Tokens {
             caret: Color32::BLACK,
             text_selection: Color32::from_rgba_unmultiplied(0x5A, 0x8F, 0xE0, 90),
             field_bg: Color32::from_rgb(0x2A, 0x2A, 0x2A),
+            control: Color32::from_rgb(0x2A, 0x2A, 0x2A),
+            control_hover: Color32::from_rgb(0x40, 0x40, 0x40),
+            control_pressed: Color32::from_rgb(0x4C, 0x4C, 0x4C),
             shadow: Color32::from_black_alpha(90),
         }
     }
@@ -271,6 +287,10 @@ impl Tokens {
                 caret: Color32::BLACK,
                 text_selection: Color32::from_rgba_unmultiplied(0x00, 0x9C, 0xFF, 110),
                 field_bg: Color32::BLACK,
+                text_field: Color32::BLACK,
+                control: Color32::from_gray(0x50),
+                control_hover: Color32::from_gray(0x66),
+                control_pressed: Color32::from_gray(0x7A),
                 shadow: Color32::TRANSPARENT,
             }
         } else {
@@ -299,6 +319,10 @@ impl Tokens {
                 caret: Color32::BLACK,
                 text_selection: Color32::from_rgba_unmultiplied(0x00, 0x5A, 0xE0, 90),
                 field_bg: Color32::WHITE,
+                text_field: Color32::WHITE,
+                control: Color32::from_gray(0xB0),
+                control_hover: Color32::from_gray(0x9C),
+                control_pressed: Color32::from_gray(0x88),
                 shadow: Color32::TRANSPARENT,
             }
         }
@@ -371,6 +395,7 @@ pub fn apply(ctx: &egui::Context, t: &Tokens) {
     v.panel_fill = t.chrome;
     v.window_fill = t.card;
     v.extreme_bg_color = t.field_bg;
+    v.text_edit_bg_color = Some(t.text_field);
     v.faint_bg_color = t.hover;
     v.window_stroke = Stroke::new(1.0, t.card_border);
     v.window_corner_radius = CornerRadius::same(10);
@@ -384,13 +409,13 @@ pub fn apply(ctx: &egui::Context, t: &Tokens) {
     }
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, t.separator);
     v.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-    v.widgets.inactive.bg_fill = t.field_bg;
+    v.widgets.inactive.bg_fill = t.control;
     v.widgets.inactive.bg_stroke = Stroke::NONE;
     v.widgets.hovered.weak_bg_fill = t.hover;
-    v.widgets.hovered.bg_fill = t.hover;
+    v.widgets.hovered.bg_fill = t.control_hover;
     v.widgets.hovered.bg_stroke = Stroke::NONE;
     v.widgets.active.weak_bg_fill = t.pressed;
-    v.widgets.active.bg_fill = t.pressed;
+    v.widgets.active.bg_fill = t.control_pressed;
     v.widgets.open.weak_bg_fill = t.pressed;
     if t.high_contrast {
         // Every control shows its edge, and the one under the pointer or keyboard focus is
@@ -526,6 +551,24 @@ mod tests {
         let mut o = ctx.run_ui(Default::default(), |_| {});
         o.textures_delta.clear();
         out
+    }
+
+    #[test]
+    fn light_checkboxes_and_slider_rails_stand_out_from_their_background() {
+        // An unchecked checkbox and a slider rail are filled with the inactive widget fill and
+        // have no outline, so in light mode they vanished into the white dialog (#766).
+        let ctx = egui::Context::default();
+        super::apply(&ctx, &super::Tokens::light());
+        let v = ctx.global_style().visuals.clone();
+        assert_eq!(v.widgets.inactive.bg_stroke, egui::Stroke::NONE, "the test assumes no outline");
+        let fill = v.widgets.inactive.bg_fill;
+        for (name, bg) in [("dialog", v.window_fill), ("panel", v.panel_fill)] {
+            let diff = [fill.r().abs_diff(bg.r()), fill.g().abs_diff(bg.g()), fill.b().abs_diff(bg.b())];
+            assert!(diff.iter().all(|d| *d >= 24), "control fill {fill:?} is too close to the {name} background {bg:?}");
+        }
+        // Hovering and pressing darken the control a step each, as they do buttons.
+        let (hovered, active) = (v.widgets.hovered.bg_fill, v.widgets.active.bg_fill);
+        assert!(fill.r() > hovered.r() && hovered.r() > active.r(), "idle {fill:?}, hovered {hovered:?}, active {active:?} don't darken in turn");
     }
 
     #[test]

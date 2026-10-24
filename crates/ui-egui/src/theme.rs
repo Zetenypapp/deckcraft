@@ -289,8 +289,8 @@ impl Tokens {
                 field_bg: Color32::BLACK,
                 text_field: Color32::BLACK,
                 control: Color32::from_gray(0x50),
-                control_hover: Color32::from_gray(0x66),
-                control_pressed: Color32::from_gray(0x7A),
+                control_hover: Color32::from_gray(0x3C),
+                control_pressed: Color32::from_gray(0x28),
                 shadow: Color32::TRANSPARENT,
             }
         } else {
@@ -321,8 +321,8 @@ impl Tokens {
                 field_bg: Color32::WHITE,
                 text_field: Color32::WHITE,
                 control: Color32::from_gray(0xB0),
-                control_hover: Color32::from_gray(0x9C),
-                control_pressed: Color32::from_gray(0x88),
+                control_hover: Color32::from_gray(0xC8),
+                control_pressed: Color32::from_gray(0xDC),
                 shadow: Color32::TRANSPARENT,
             }
         }
@@ -620,6 +620,10 @@ mod tests {
                 assert!(contrast(t.text, bg) >= 7.0, "dark={dark}: {:.2}:1", contrast(t.text, bg));
             }
             assert!(contrast(t.accent_text, t.accent) >= 7.0);
+            // Check boxes, slider rails and their hovered and pressed fills carry the text at 7:1.
+            for (name, fill) in [("control", t.control), ("hovered", t.control_hover), ("pressed", t.control_pressed)] {
+                assert!(contrast(t.text, fill) >= 7.0, "dark={dark}: text on the {name} control is {:.2}:1", contrast(t.text, fill));
+            }
             assert!(contrast(t.border, t.chrome) >= 7.0, "outlines stand out");
             assert!(contrast(t.text_faint, t.chrome) >= 4.5, "even disabled text is legible");
         }

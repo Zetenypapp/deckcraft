@@ -1344,45 +1344,57 @@ fn bullets(ui: &mut Ui, items: &[&str]) {
 /// there is nothing to sign in to.
 fn account(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    ui.horizontal_top(|ui| {
-        ui.vertical(|ui| {
-            ui.set_width(THEMES_W);
-            heading(ui, "Appearance");
-            appearance(app, ui, &t);
-            ui.add_space(16.0);
-            heading(ui, "User Information");
-            dim(ui, "DeckCraft has no accounts: there is nothing to sign in to, and your presentations stay on your device.");
-        });
-        ui.add_space(40.0);
-        ui.vertical(|ui| {
-            heading(ui, "Product Information");
-            ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
-                crate::dialogs::paint_logo(ui.painter(), r);
-                ui.label(RichText::new("DeckCraft").font(theme::bold(24.0)).color(t.text));
+    let left = |app: &mut SlideApp, ui: &mut Ui| {
+        heading(ui, "Appearance");
+        appearance(app, ui, &t);
+        ui.add_space(16.0);
+        heading(ui, "User Information");
+        dim(ui, "DeckCraft has no accounts: there is nothing to sign in to, and your presentations stay on your device.");
+    };
+    // Side by side when Product Information has room next to the theme cards, else one column.
+    // The page's max width is CONTENT_W even in a narrower window: measure what is visible.
+    let room = ui.available_width().min(ui.clip_rect().right() - ui.max_rect().left());
+    if room >= THEMES_W + 40.0 + PRODUCT_MIN_W {
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(THEMES_W);
+                left(app, ui);
             });
-            dim(ui, &crate::dialogs::version_line());
-            dim(ui, "Open source under MIT OR Apache-2.0. Not affiliated with Microsoft.");
-            ui.add_space(14.0);
-            if task(
-                ui,
-                Icon::Help,
-                "About DeckCraft",
-                "About DeckCraft",
-                "The version, the people and models who built it, and where to find us.",
-                true,
-            ) {
-                let _ = app.run("app.about", json!({}));
-            }
-            ui.hyperlink_to("Join our community on Discord", deckcraft_engine::links::DISCORD);
-            ui.hyperlink_to("Source on GitHub", deckcraft_engine::links::GITHUB);
+            ui.add_space(40.0);
+            ui.vertical(|ui| product_information(app, ui, &t));
         });
+    } else {
+        ui.vertical(|ui| {
+            left(app, ui);
+            ui.add_space(24.0);
+            product_information(app, ui, &t);
+        });
+    }
+}
+
+/// Account's Product Information column: logo, version, About and links.
+fn product_information(app: &mut SlideApp, ui: &mut Ui, t: &Tokens) {
+    heading(ui, "Product Information");
+    ui.horizontal(|ui| {
+        let (r, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
+        crate::dialogs::paint_logo(ui.painter(), r);
+        ui.label(RichText::new("DeckCraft").font(theme::bold(24.0)).color(t.text));
     });
+    dim(ui, &crate::dialogs::version_line());
+    dim(ui, "Open source under MIT OR Apache-2.0. Not affiliated with Microsoft.");
+    ui.add_space(14.0);
+    if task(ui, Icon::Help, "About DeckCraft", "About DeckCraft", "The version, the people and models who built it, and where to find us.", true) {
+        let _ = app.run("app.about", json!({}));
+    }
+    ui.hyperlink_to("Join our community on Discord", deckcraft_engine::links::DISCORD);
+    ui.hyperlink_to("Source on GitHub", deckcraft_engine::links::GITHUB);
 }
 
 /// Width of Account's left column: three theme cards side by side.
 const THEMES_W: f32 = 3.0 * THEME_CARD.x + 2.0 * 12.0;
 const THEME_CARD: egui::Vec2 = vec2(170.0, 102.0);
+/// The narrowest Product Information column shown beside the theme cards.
+const PRODUCT_MIN_W: f32 = 280.0;
 
 /// Light or dark, and the interface theme (PowerPoint's Office Theme): a preview of every theme in
 /// the current mode, and the Custom theme's colours.
@@ -1421,14 +1433,15 @@ fn appearance(app: &mut SlideApp, ui: &mut Ui, t: &Tokens) {
         let mut c = app.ui.custom_theme;
         let mut changed = false;
         egui::Grid::new("custom_theme").num_columns(2).spacing(vec2(16.0, 8.0)).show(ui, |ui| {
-            ui.label("Window tint");
-            changed |= ui.color_edit_button_srgb(&mut c.tint).changed();
+            // Each control is labelled by the text beside it, for screen readers.
+            let label = ui.label("Window tint");
+            changed |= ui.color_edit_button_srgb(&mut c.tint).labelled_by(label.id).changed();
             ui.end_row();
-            ui.label("Accent");
-            changed |= ui.color_edit_button_srgb(&mut c.accent).changed();
+            let label = ui.label("Accent");
+            changed |= ui.color_edit_button_srgb(&mut c.accent).labelled_by(label.id).changed();
             ui.end_row();
-            ui.label("Tint strength");
-            changed |= ui.add(egui::Slider::new(&mut c.strength, 0.0..=1.0).show_value(false)).changed();
+            let label = ui.label("Tint strength");
+            changed |= ui.add(egui::Slider::new(&mut c.strength, 0.0..=1.0).show_value(false)).labelled_by(label.id).changed();
             ui.end_row();
         });
         if changed {

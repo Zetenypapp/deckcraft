@@ -593,6 +593,41 @@ fn the_gear_opens_account_and_theme_cards_apply() {
     assert_eq!(h.state().ui.ui_theme, theme::UiTheme::Custom, "leaving keeps the theme");
 }
 
+/// Account at the narrowest main window puts Product Information under the theme cards instead
+/// of squeezing it beside them; a wide window keeps the two columns. The Custom colour controls
+/// carry their labels.
+#[test]
+fn account_stacks_in_a_narrow_window_and_custom_controls_are_labelled() {
+    let columns = |width: f32| {
+        let mut h = Harness::builder().with_size(egui::vec2(width, 900.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            new_app(),
+        );
+        h.run_steps(3);
+        h.state_mut().run("app.backstage", json!({"page": "account"})).unwrap();
+        h.run_steps(3);
+        let cards = h.get_by_label("Lagoon").rect();
+        let about = h.query_all_by_label("About DeckCraft").next().map(|n| n.rect()).unwrap();
+        (cards, about)
+    };
+    let (cards, about) = columns(900.0);
+    assert!(about.min.y > cards.max.y, "stacked: About sits below the theme cards ({cards:?} {about:?})");
+    let (cards, about) = columns(1400.0);
+    assert!(about.min.x > cards.max.x, "wide: About sits beside the theme cards");
+
+    let mut h = harness(new_app());
+    h.state_mut().run("view.uiTheme", json!({"theme": "custom"})).unwrap();
+    h.state_mut().run("app.backstage", json!({"page": "account"})).unwrap();
+    h.run_steps(3);
+    for name in ["Window tint", "Accent", "Tint strength"] {
+        let by = egui_kittest::kittest::by().predicate(move |n| n.labelled_by().any(|l| l.value().as_deref() == Some(name)));
+        assert_eq!(h.query_all(by).count(), 1, "{name}: one control labelled by the text");
+    }
+}
+
 #[test]
 fn ui_theme_command_sets_and_validates() {
     let mut app = SlideApp::new(Session::new(), Services::default());

@@ -671,3 +671,20 @@ fn the_theme_is_saved_with_the_ui_state() {
     let old: crate::UiState = serde_json::from_value(json!({"brightness": "dark", "tab": "Home"})).unwrap();
     assert_eq!((old.ui_theme, old.brightness), (theme::UiTheme::Standard, theme::Brightness::Dark));
 }
+
+/// Options in the File tab opens the Preferences dialog, and Cancel closes it (#782, #752).
+#[test]
+fn options_in_backstage_opens_preferences_and_cancel_closes_it() {
+    let mut h = harness(new_app());
+    h.get_by_label("File").click();
+    h.run_steps(3);
+    assert!(h.state().backstage_open());
+    h.get_by_label("Options").click();
+    h.run_steps(3);
+    assert!(h.state().dialog.is_some(), "Options opens Preferences dialog");
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.id.as_str()), Some("preferences"));
+    h.query_all_by_role_and_label(Role::Button, "Cancel").next().expect("Cancel button").click_accesskit();
+    h.run_steps(3);
+    assert!(h.state().dialog.is_none(), "Cancel closes Preferences dialog");
+    assert!(h.state().backstage_open(), "Backstage remains open");
+}

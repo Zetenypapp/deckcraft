@@ -841,27 +841,41 @@ impl SlideApp {
     /// `settings.newPresentation`: File › Settings › New Presentations. Each setting given is
     /// checked and stored in the engine's prefs, which `file.new` reads.
     fn new_presentation_defaults(&mut self, p: &Value) -> Result<Value, String> {
-        let prefs = &mut self.session.prefs;
-        if let Some(name) = p.get("theme").and_then(Value::as_str).map(str::trim) {
-            prefs.new_theme = if name.is_empty() {
-                String::new()
-            } else {
+        // Every value is checked before any is kept, so a refused call changes nothing.
+        let text = |key: &str| match p.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(v)) => Ok(Some(v.trim())),
+            Some(_) => Err(format!("`{key}` must be text")),
+        };
+        let theme = match text("theme")? {
+            None => None,
+            Some("") => Some(String::new()),
+            Some(name) => {
                 let th = deckcraft_model::theme::builtin_themes().into_iter().find(|t| t.name.eq_ignore_ascii_case(name));
-                th.map(|t| t.name).ok_or_else(|| format!("no built-in theme is called `{name}`"))?
-            };
-        }
-        if let Some(size) = p.get("size").and_then(Value::as_str) {
-            prefs.new_size = match size.to_ascii_lowercase().as_str() {
-                "standard" => "standard".into(),
+                Some(th.map(|t| t.name).ok_or_else(|| format!("no built-in theme is called `{name}`"))?)
+            }
+        };
+        let size = match text("size")? {
+            None => None,
+            Some(size) => Some(match size.to_ascii_lowercase().as_str() {
+                "standard" => "standard".to_string(),
                 "widescreen" => String::new(),
                 _ => return Err(format!("`size` must be widescreen or standard, not `{size}`")),
-            };
+            }),
+        };
+        let font = match text("font")? {
+            Some(font) if font.len() > 128 => return Err("`font` is too long to be a font name".into()),
+            font => font.map(str::to_string),
+        };
+        let prefs = &mut self.session.prefs;
+        if let Some(theme) = theme {
+            prefs.new_theme = theme;
         }
-        if let Some(font) = p.get("font").and_then(Value::as_str).map(str::trim) {
-            if font.len() > 128 {
-                return Err("`font` is too long to be a font name".into());
-            }
-            prefs.new_font = font.to_string();
+        if let Some(size) = size {
+            prefs.new_size = size;
+        }
+        if let Some(font) = font {
+            prefs.new_font = font;
         }
         if p.get("forgetShape").and_then(Value::as_bool) == Some(true) {
             prefs.default_shape = None;

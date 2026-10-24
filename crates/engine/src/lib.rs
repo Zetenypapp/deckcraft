@@ -398,6 +398,8 @@ impl Prefs {
         if self.author.chars().count() > 256 {
             self.author = self.author.chars().take(256).collect();
         }
+        // New presentations are standard (4:3) or widescreen (empty), whatever the file's spelling.
+        self.new_size = if self.new_size.eq_ignore_ascii_case("standard") { "standard".into() } else { String::new() };
         // A picture fill in the default shape names a picture no other presentation has.
         if let Some(d) = &mut self.default_shape
             && matches!(d.fill, Some(deckcraft_model::Fill::Picture(_)))

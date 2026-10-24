@@ -912,6 +912,12 @@ fn the_new_presentations_tab_sets_what_new_presentations_start_with() {
     assert_eq!(app.session.prefs.new_theme, last, "stored under its own name");
     assert!(app.run("settings.newPresentation", json!({"theme": "Not A Theme"})).is_err());
     assert!(app.run("settings.newPresentation", json!({"size": "huge"})).is_err());
+    // A refused call keeps nothing, not even its valid parts; values that aren't text are refused.
+    for bad in [json!({"font": "Arial", "size": "huge"}), json!({"theme": "", "font": 5}), json!({"size": true})] {
+        assert!(app.run("settings.newPresentation", bad.clone()).is_err(), "{bad} should be refused");
+        assert_eq!((app.session.prefs.new_theme.as_str(), app.session.prefs.new_font.as_str()), (last.as_str(), "Georgia"), "{bad} changed a pref");
+        assert_eq!(app.session.prefs.new_size, "standard", "{bad} changed the size");
+    }
     app.run("file.new", json!({})).unwrap();
     let doc = &app.session.active().unwrap().doc;
     assert_eq!(doc.slide_size, deckcraft_model::defaults::STANDARD);

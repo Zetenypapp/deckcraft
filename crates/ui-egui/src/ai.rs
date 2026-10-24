@@ -245,13 +245,7 @@ pub fn cap_slides(outline: &str) -> (String, usize) {
             kept.push(line);
         }
     }
-    (
-        kept.join(
-            "
-",
-        ),
-        slides,
-    )
+    (kept.join("\n"), slides)
 }
 
 /// A line `slide.fromOutline` reads as a heading, so a slide: one to six `#` (up to three spaces
@@ -307,15 +301,7 @@ mod tests {
 
     #[test]
     fn a_runaway_outline_is_cut_to_the_most_slides_one_draft_adds() {
-        let long: String = (0..5000)
-            .map(|i| {
-                format!(
-                    "## Slide {i}
-- point
-"
-                )
-            })
-            .collect();
+        let long: String = (0..5000).map(|i| format!("## Slide {i}\n- point\n")).collect();
         // Only lines read as headings are slides: `#tag` and `#######` are text.
         let tagged: String = std::iter::once("#tag".to_string()).chain((0..60).map(|i| format!("line {i}"))).collect::<Vec<_>>().join("\n");
         assert_eq!(cap_slides(&tagged).1, 0, "no heading, so no outline");

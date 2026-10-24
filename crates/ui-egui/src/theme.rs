@@ -353,7 +353,8 @@ impl Tokens {
         let m = |c: Color32, f: f32| mix(c, tint, k * f);
         let [chrome, card, canvas, field_bg, hover, pressed, selected] = at(k);
         let surfaces = [chrome, card, canvas, field_bg];
-        let accent = ensure_contrast(accent, &[chrome, card], 3.0);
+        // The accent is also link and status text: 4.5:1 (WCAG AA) on every surface it sits on.
+        let accent = ensure_contrast(accent, &surfaces, 4.5);
         let accent_text = if contrast(Color32::WHITE, accent) >= contrast(Color32::BLACK, accent) { Color32::WHITE } else { Color32::BLACK };
         Tokens {
             chrome,
@@ -601,6 +602,12 @@ mod tests {
                 assert!(contrast(t.text_dim, bg) >= 4.5, "{th:?} {b:?}: dim text on {name} is {:.2}:1", contrast(t.text_dim, bg));
             }
             assert!(contrast(t.accent_text, t.accent) >= 3.0, "{th:?} {b:?}: button text on the accent");
+            // The tinted themes' accent is also link and status text.
+            if matches!(th, UiTheme::Lagoon | UiTheme::Sunset | UiTheme::Custom) {
+                for (name, bg) in [("chrome", t.chrome), ("card", t.card), ("canvas", t.canvas), ("field", t.field_bg)] {
+                    assert!(contrast(t.accent, bg) >= 4.5, "{th:?} {b:?}: accent on {name} is {:.2}:1", contrast(t.accent, bg));
+                }
+            }
         }
     }
 
@@ -630,6 +637,9 @@ mod tests {
                         assert!(contrast(t.text, bg) >= 7.0, "tint {tint:?} {b:?}: {:.2}:1", contrast(t.text, bg));
                     }
                     assert!(contrast(t.accent_text, t.accent) >= 3.0, "tint {tint:?} accent {accent:?} {b:?}");
+                    for bg in [t.chrome, t.card, t.canvas, t.field_bg] {
+                        assert!(contrast(t.accent, bg) >= 4.5, "tint {tint:?} accent {accent:?} {b:?}: link {:.2}:1", contrast(t.accent, bg));
+                    }
                 }
             }
         }

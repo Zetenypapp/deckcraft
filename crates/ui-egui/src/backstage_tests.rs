@@ -920,8 +920,8 @@ fn the_new_presentations_tab_sets_what_new_presentations_start_with() {
     assert_eq!(v, json!({"theme": "", "size": "widescreen", "font": "", "defaultShape": false}));
 }
 
-/// Backup and Reset: a backup file brings every setting back, but not the recent files; a file
-/// that isn't a backup changes nothing.
+/// Backup and Reset: a backup file brings every setting back, but not the recent files or the Text
+/// Pane's SmartArt drafts; a file that isn't a backup changes nothing.
 #[test]
 fn settings_back_up_to_a_file_and_restore_from_it() {
     let dir = temp_dir("settings-backup");
@@ -938,6 +938,7 @@ fn settings_back_up_to_a_file_and_restore_from_it() {
     };
     let mut app = SlideApp::new(Session::with_new(), services(dir.clone()));
     app.ui.recent = vec!["mine.pptx".into()];
+    app.ui.smartart_drafts = (7, vec!["Quarterly secret".into()]);
     app.run("view.uiTheme", json!({"theme": "lagoon"})).unwrap();
     app.run("keys.set", json!({"action": "view.gridlines", "keys": ["Cmd+Alt+Shift+J"]})).unwrap();
     app.run("view.reduceMotion", json!({"on": true})).unwrap();
@@ -949,6 +950,7 @@ fn settings_back_up_to_a_file_and_restore_from_it() {
     h.run_steps(3);
     let text = std::fs::read_to_string(&file).unwrap();
     assert!(text.contains("lagoon") && !text.contains("mine.pptx"), "the recent files stay out of the backup");
+    assert!(!text.contains("Quarterly secret"), "document text stays out of the backup");
 
     let mut other = SlideApp::new(Session::with_new(), services(dir.clone()));
     other.ui.recent = vec!["theirs.pptx".into()];

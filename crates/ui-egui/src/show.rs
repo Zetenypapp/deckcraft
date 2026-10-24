@@ -577,8 +577,11 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64, 
         use egui::Key::*;
         // Custom slide-show keys (File › Settings › Keyboard Shortcuts) map onto the built-in ones.
         // A built-in key whose action has other keys now does nothing, and a focused presenter
-        // button doesn't get it either.
-        let Some((k, m)) = keymap.show_key(pressed, pressed_mods) else {
+        // button doesn't get it either. While a slide number is typed, Enter, Backspace and Escape
+        // stay Go to Slide's own, whatever the custom keys.
+        let goto_key = !show.goto.is_empty() && plain(pressed_mods) && matches!(pressed, Enter | Backspace | Escape);
+        let hit = if goto_key { Some((pressed, pressed_mods)) } else { keymap.show_key(pressed, pressed_mods) };
+        let Some((k, m)) = hit else {
             ctx.input_mut(|i| i.consume_key(pressed_mods, pressed));
             continue;
         };
@@ -2295,6 +2298,13 @@ mod tests {
         harness.key_press(egui::Key::Enter);
         harness.run_steps(2);
         assert_eq!(harness.state().1.state.slide, 1, "Enter does nothing, not even press Next");
+        // Go to Slide keeps Enter and Backspace (Previous lost Backspace): 3, 1, Backspace, Enter.
+        for k in [egui::Key::Num3, egui::Key::Num1, egui::Key::Backspace, egui::Key::Enter] {
+            harness.key_press(k);
+            harness.run_steps(2);
+        }
+        assert_eq!(harness.state().1.state.slide, 2, "typed 3 goes to the third slide");
+        assert!(harness.state().1.goto.is_empty());
     }
 
     #[test]

@@ -69,7 +69,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Share | Cloud sharing | Not offered |
 | Export | Create PDF/XPS Document, Create a Video, Create an Animated GIF, Package Presentation for CD, Create Handouts, Change File Type | Create PDF Document, Create Handouts (a PDF), Change File Type (PNG with an optional transparent background, #784). No video, GIF or CD package |
 | Close | Closes; asks Save / Don't Save / Cancel about unsaved changes | Same (`file.close` after the prompt); Ctrl+W asks too |
-| Account | User information, sign-in, Office Background and Office Theme, product information, About | Appearance: light/dark (`view.dark`) and the interface theme, with a preview of each (Standard, High Contrast, Lagoon, Sunset, Custom; `view.uiTheme`); product information, About DeckCraft. No accounts to sign in to |
+| Account | User information, sign-in, Office Background and Office Theme, product information, About | Appearance: light/dark (`view.dark`) and a link to File › Settings, whose Themes tab holds the interface themes (`view.uiTheme`); product information, About DeckCraft. No accounts to sign in to |
 | Options | Opens the PowerPoint Options dialog | Opens Preferences |
 
 ## Panes and dialogs

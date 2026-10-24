@@ -470,7 +470,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
         "app.backstage",
         "File",
         Some("Alt+F"),
-        "{page?: home|new|open|info|saveAs|print|export|account|settings, tab?: general|themes|new|shortcuts|ai|backup, on?: bool}",
+        "{page?: home|new|open|info|saveAs|print|export|account|settings, tab?: general|themes|new|shortcuts|ai|backup|reset, on?: bool}",
     ),
     ("app.closePresentation", "Close", Some("Cmd+W"), "{}"),
     (
@@ -871,6 +871,8 @@ impl SlideApp {
     fn settings_backup(&self) -> Result<Value, String> {
         let mut ui = self.ui.clone();
         ui.recent.clear();
+        // The Text Pane's SmartArt drafts are document text, not settings.
+        ui.smartart_drafts = (0, vec![]);
         let ui = serde_json::to_value(&ui).map_err(|e| e.to_string())?;
         let prefs = serde_json::to_value(&self.session.prefs).map_err(|e| e.to_string())?;
         Ok(json!({"deckcraft": "settings", "version": 1, "ui": ui, "prefs": prefs}))
